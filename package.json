@@ -13,7 +13,8 @@
     "pug": "^3.0.2"
   },
   "scripts": {
-    "start": "node api/index.js"
+    "start": "node api/index.js",
+    "init-storage-metadata": "node api/scripts/initStorageMetadata.js"
   },
   "name": "uygidrive",
   "version": "0.0.3",

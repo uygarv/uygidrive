@@ -17,7 +17,23 @@ let pathDisplay
 
 let confirmationModal
 let confirmButton
-  
+
+function renderStorageUsage(usage) {
+  const storageBadge = document.getElementById('storageBadge');
+  const storageProgressBar = document.getElementById('storageProgressBar');
+  const storageUsageLabel = document.getElementById('storageUsageLabel');
+  const storageLimitLabel = document.getElementById('storageLimitLabel');
+
+  if (!storageBadge || !storageProgressBar || !storageUsageLabel || !storageLimitLabel) {
+    return;
+  }
+
+  const percentUsed = Math.min(100, usage?.percentUsed || 0);
+  storageBadge.textContent = usage?.isUnlimited ? 'Unlimited' : `${percentUsed}% used`;
+  storageProgressBar.style.width = `${percentUsed}%`;
+  storageUsageLabel.textContent = `${usage?.usedDisplay || 'Not'} used`;
+  storageLimitLabel.textContent = usage?.isUnlimited ? '' : `Limit: ${usage?.limitDisplay || '2 GB'}`;
+}
 
 window.onload = function() {
   const uploadForm = document.getElementById('uploadForm');
@@ -47,6 +63,7 @@ window.onload = function() {
   confirmButton = document.getElementById("confirmButton")
   
   let previewModal = document.getElementsByClassName("previewEmbed")
+
   let urlInput = document.getElementById("urlInput")
   
   const firebaseConfig = {
@@ -89,6 +106,7 @@ window.onload = function() {
       const xhr = new XMLHttpRequest();
 
       xhr.open('POST', '/upload?path=' + ((path == "/") ? "" : path), true);
+      xhr.setRequestHeader('X-File-Size', file.size);
 
       //progressDiv.style.display = "block"
       uploadForm.style.display = "none"
@@ -320,8 +338,12 @@ function loadList() {
 
     listXhr.onload = function () {
       if (listXhr.status === 200) {
-        const {files, next} = JSON.parse(listXhr.responseText);
+        const {files, next, storage} = JSON.parse(listXhr.responseText);
         
+        if (storage) {
+          renderStorageUsage(storage);
+        }
+
         if (next == false) {
           nextPage.style.display = "none"
         } else {

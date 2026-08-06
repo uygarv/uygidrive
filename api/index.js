@@ -18,6 +18,7 @@ const contentDisposition = require('content-disposition');
 const { PassThrough } = require('stream');
 const ffmpeg = require('fluent-ffmpeg');
 const archiver = require('archiver');
+const { getStorageLimitConfig, getUserStorageUsage, formatBytes, invalidateUserStorageUsageCache, setUserStorageUsageCache, updateUserStorageUsage, STORAGE_METADATA_FILENAME, wouldExceedStorageLimit } = require('./storageQuota');
 
 require('dotenv').config()
 
@@ -174,6 +175,28 @@ app.get("/drive", authenticateToken, (req, res) => {
   res.render('uploadv2.ejs', { email: req.user.email });
 });
 
+app.get('/storage/usage', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const storageLimit = getStorageLimitConfig(userId);
+    const usedBytes = await getUserStorageUsage(bucket, userId);
+    const limitBytes = storageLimit.limitBytes;
+
+    res.json({
+      usedBytes,
+      limitBytes,
+      isUnlimited: storageLimit.isUnlimited,
+      usedDisplay: formatBytes(usedBytes),
+      limitDisplay: storageLimit.isUnlimited ? 'Unlimited' : formatBytes(limitBytes),
+      percentUsed: storageLimit.isUnlimited ? 100 : Math.min(100, Math.round((usedBytes / limitBytes) * 100)),
+      limitLabel: storageLimit.isUnlimited ? 'Unlimited' : '2 GB',
+    });
+  } catch (error) {
+    console.error('Storage usage lookup failed:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get("/login", async (req, res) => {
   let sessionCookie = req.cookies.session || '';
   try {
@@ -185,22 +208,91 @@ app.get("/login", async (req, res) => {
   }
 });
 
-app.post('/upload', authenticateToken, (req, res) => {
+app.post('/upload', authenticateToken, async (req, res) => {
   const bb = busboy({ headers: req.headers });
-  const user = req.user
-  const pathQuery = req.query.path || ""
-  
-  let fileUrl = []
-  
-  bb.on('file', (fieldname, file, filename, encoding, mimetype) => {
-    filename = filename.filename
-    
-    let pathWithoutUser = pathQuery + filename
-    
+  const user = req.user;
+  const pathQuery = req.query.path || "";
+  const storageLimit = getStorageLimitConfig(user.uid);
+  let responded = false;
+
+  function rejectUpload(statusCode, message, fileStream) {
+    if (responded) {
+      return;
+    }
+
+    responded = true;
+
+    try {
+      if (fileStream && typeof fileStream.destroy === 'function' && !fileStream.destroyed) {
+        fileStream.destroy();
+      }
+    } catch (destroyError) {
+      console.error('Failed to destroy upload stream:', destroyError);
+    }
+
+    try {
+      req.unpipe(bb);
+      req.pause();
+    } catch (streamError) {
+      console.error('Failed to pause upload request:', streamError);
+    }
+
+    res.status(statusCode).send(message);
+  }
+
+  bb.on('file', async (fieldname, file, filename, encoding, mimetype) => {
+    filename = filename.filename;
+
+    let pathWithoutUser = pathQuery + filename;
     const filePath = `${user.uid}/${pathWithoutUser}`;
-    console.log(filePath)
-    
     const fileUpload = bucket.file(filePath);
+
+    let currentUsage = 0;
+    let existingFileSize = 0;
+    let projectedBytes = 0;
+    let uploadedBytes = 0;
+    let exceededQuota = false;
+
+    try {
+      currentUsage = await getUserStorageUsage(bucket, user.uid);
+      const fileSizeHeader = req.headers['x-file-size'] || req.headers['content-length'];
+      const parsedFileSize = Number(fileSizeHeader);
+      projectedBytes = Number.isFinite(parsedFileSize) && parsedFileSize > 0 ? parsedFileSize : 0;
+
+      const [existingFileExists] = await fileUpload.exists();
+      if (existingFileExists) {
+        try {
+          const [metadata] = await fileUpload.getMetadata();
+          existingFileSize = Number(metadata.size || 0);
+        } catch (metadataError) {
+          console.error('Unable to inspect existing file size', metadataError.message);
+        }
+      }
+
+      const projectedUsage = currentUsage - existingFileSize + projectedBytes;
+      const exceedsLimit = projectedUsage >= (storageLimit.limitBytes || Number.MAX_SAFE_INTEGER);
+      console.log('[upload-quota-check]', {
+        userId: user.uid,
+        currentUsage,
+        existingFileSize,
+        projectedBytes,
+        projectedUsage,
+        limitBytes: storageLimit.limitBytes,
+        exceedsLimit,
+        isUnlimited: storageLimit.isUnlimited,
+      });
+
+      if (currentUsage >= (storageLimit.limitBytes || Number.MAX_SAFE_INTEGER)) {
+        return rejectUpload(413, `Storage limit exceeded. You are using ${formatBytes(currentUsage)} of ${formatBytes(storageLimit.limitBytes)}.`, file);
+      }
+
+      if (projectedBytes > 0 && exceedsLimit) {
+        return rejectUpload(413, `Storage limit exceeded. You are using ${formatBytes(currentUsage)} of ${formatBytes(storageLimit.limitBytes)}.`, file);
+      }
+    } catch (error) {
+      console.error('Storage quota check failed:', error);
+      return rejectUpload(500, 'Unable to verify storage quota.');
+    }
 
     const uploadStream = fileUpload.createWriteStream({
       metadata: {
@@ -208,16 +300,63 @@ app.post('/upload', authenticateToken, (req, res) => {
       },
     });
 
-    file.pipe(uploadStream);
+    file.on('data', (chunk) => {
+      uploadedBytes += chunk.length;
+      const projectedUsage = currentUsage - existingFileSize + uploadedBytes;
+      const exceedsLimit = projectedUsage >= (storageLimit.limitBytes || Number.MAX_SAFE_INTEGER);
 
-    uploadStream.on('error', (err) => {
-      console.error(err);
-      return res.status(500).render('static/error.ejs', {"title": 500, "detail": "error while uploading"});
+      if (exceedsLimit) {
+        exceededQuota = true;
+        file.destroy();
+        uploadStream.destroy();
+        console.log('[upload-quota-during-stream]', {
+          userId: user.uid,
+          currentUsage,
+          existingFileSize,
+          uploadedBytes,
+          projectedUsage,
+          limitBytes: storageLimit.limitBytes,
+          exceedsLimit,
+        });
+        return rejectUpload(413, `Storage limit exceeded. You are using ${formatBytes(currentUsage)} of ${formatBytes(storageLimit.limitBytes)}.`, file);
+      }
     });
 
-    uploadStream.on('finish', () => {
-      const fileUrl = getFileUrl(pathWithoutUser, req)
-      res.send(fileUrl);
+    file.pipe(uploadStream);
+
+    uploadStream.on('error', async (err) => {
+      console.error(err);
+      if (!responded) {
+        if (exceededQuota) {
+          return rejectUpload(413, `Storage limit exceeded. You are using ${formatBytes(currentUsage)} of ${formatBytes(storageLimit.limitBytes)}.`, file);
+        }
+
+        return rejectUpload(500, 'error while uploading');
+      }
+    });
+
+    uploadStream.on('finish', async () => {
+      if (exceededQuota) {
+        try {
+          await fileUpload.delete();
+        } catch (cleanupError) {
+          console.error('Failed to cleanup oversized upload:', cleanupError);
+        }
+        return;
+      }
+
+      if (!storageLimit.isUnlimited && storageLimit.limitBytes !== null) {
+        await updateUserStorageUsage(bucket, user.uid, uploadedBytes - existingFileSize);
+      } else {
+        await updateUserStorageUsage(bucket, user.uid, 0);
+      }
+      invalidateUserStorageUsageCache(user.uid);
+
+      const fileUrl = getFileUrl(pathWithoutUser, req);
+      if (!responded) {
+        responded = true;
+        res.send(fileUrl);
+      }
     });
   });
 
@@ -297,18 +436,6 @@ function getPublicUrl(filename) {
   );
   
   return publicUrl
-}
-
-function formatBytes(bytes, decimals = 2) {
-  if (bytes === 0) return '0 Bytes';
-
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
 const replaceSpecialChars = (str) => {
@@ -554,15 +681,33 @@ app.delete("/file/*", authenticateToken, async (req, res) => {
     console.log(filename)
     
     const filePath = `${user.uid}/${filename}`
+    let deletedBytes = 0;
     
     try {
+      const [metadata] = await bucket.file(filePath).getMetadata();
+      deletedBytes = Number(metadata.size || 0);
       await bucket.file(filePath).delete();
     } catch {
       filename += "/"
+      const [files] = await bucket.getFiles({ prefix: `${user.uid}/${filename}`, autoPaginate: false });
+      for (const file of files) {
+        if (file.name.endsWith('/') || file.name === `${user.uid}/${STORAGE_METADATA_FILENAME}`) {
+          continue;
+        }
+        try {
+          const [metadata] = await file.getMetadata();
+          deletedBytes += Number(metadata.size || 0);
+        } catch (error) {
+          console.error('Failed to inspect delete size for', file.name, error.message);
+        }
+      }
       await bucket.deleteFiles({
         prefix: `${user.uid}/${filename}`
       })
     }
+
+    await updateUserStorageUsage(bucket, user.uid, -deletedBytes);
+    invalidateUserStorageUsageCache(user.uid);
     
     res.json({result: "success", message: "File deleted successfully."})
   } catch (error) {
@@ -607,6 +752,7 @@ app.get("/list", authenticateToken, async (req, res) => {
     console.log("Recieved files from storage.");
     
     let fileList = [];
+    const storageUsedBytes = await getUserStorageUsage(bucket, user.uid);
 
     const filesOnly = files;
     
@@ -618,6 +764,10 @@ app.get("/list", authenticateToken, async (req, res) => {
       
       const isFolder = (file.name.endsWith("/"));
       const fileMetadata = [file.metadata];
+
+      if (file.name === `${user.uid}/${STORAGE_METADATA_FILENAME}`) {
+        continue;
+      }
       
       const mainName = fileMetadata[0].name;
       
@@ -631,7 +781,6 @@ app.get("/list", authenticateToken, async (req, res) => {
       var name = (!isFolder) ? splitUrl[splitUrl.length - 1] : splitUrl[splitUrl.length - 2];
       
       const folderPath = (pathPosix.join.apply(null, splitUrl.splice(1, splitUrl.length))) + "/";
-      console.log(splitUrl.splice(1, splitUrl.length));
       const filePath = (!isFolder) ? mainName.substring(mainName.indexOf('/') + 1) : undefined;
       
       fileNameSplit = fileNameSplit.filter(function(item) {
@@ -654,8 +803,17 @@ app.get("/list", authenticateToken, async (req, res) => {
       const fileUrl = (isFolder) ? getFolderUrl(folderPath) : getFileUrl(filePath);
       
       const fileDate = fileMetadata[0].timeCreated;
-      
-      fileList.push({ name, url: fileUrl, date: fileDate, rawSize: fileMetadata[0].size || 0, size: (!isFolder) ? formatBytes(fileMetadata[0].size || 0) : "folder", type: (isFolder) ? "folder" : "file", path: (isFolder) ? folderPath: filePath });
+      const fileSize = Number(fileMetadata[0].size || 0);
+
+      fileList.push({
+        name,
+        url: fileUrl,
+        date: fileDate,
+        rawSize: fileSize,
+        size: (!isFolder) ? formatBytes(fileSize) : "folder",
+        type: (isFolder) ? "folder" : "file",
+        path: (isFolder) ? folderPath : filePath,
+      });
     }
     
     console.log("Time took for loop: " + (new Date().getTime() - loopStartDate.getTime()) / 1000);
@@ -697,9 +855,23 @@ app.get("/list", authenticateToken, async (req, res) => {
       fileList = fileList.slice(startIndex, endIndex);
     }
     
+    const storageLimit = getStorageLimitConfig(user.uid);
+    const storagePayload = {
+      usedBytes: storageUsedBytes,
+      limitBytes: storageLimit.limitBytes,
+      isUnlimited: storageLimit.isUnlimited,
+      usedDisplay: formatBytes(storageUsedBytes),
+      limitDisplay: storageLimit.isUnlimited ? 'Unlimited' : formatBytes(storageLimit.limitBytes),
+      percentUsed: storageLimit.isUnlimited ? 0 : Math.min(100, Math.round((storageUsedBytes / storageLimit.limitBytes) * 100)),
+      limitLabel: storageLimit.isUnlimited ? 'Unlimited' : '2 GB',
+    };
+
+    setUserStorageUsageCache(user.uid, storageUsedBytes);
+
     const response = {
       files: fileList,
       next: filesOnly.length > endIndex,
+      storage: storagePayload,
     };
     
     res.json(response);

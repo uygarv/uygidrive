@@ -58,6 +58,24 @@
     </div>
   </nav>
   
+  <div class="container mt-4">
+    <div class="storage-card shadow-sm">
+      <div class="storage-header">
+        <div>
+          <h5 class="mb-1">Storage</h5>
+          <p class="storage-subtitle mb-0">Your current usage and account limit</p>
+        </div>
+        <span id="storageBadge" class="storage-badge">Loading...</span>
+      </div>
+      <div class="storage-progress-track">
+        <div id="storageProgressBar" class="storage-progress-bar" style="width: 0%"></div>
+      </div>
+      <div class="storage-metrics">
+        <span id="storageUsageLabel">0 GB used</span>
+        <span id="storageLimitLabel">Limit: 2 GB</span>
+      </div>
+    </div>
+  </div>
     
   <div class="container mt-4">
     <button type="button" class="btn btn-primary rounded-pill" data-toggle="modal" data-target="#uploadModal">
@@ -68,6 +86,8 @@
       <i class="fa-solid fa-folder-plus"></i> Create Folder
     </button>
   </div>
+
+  
   
   <!-- Upload Modal -->
     
