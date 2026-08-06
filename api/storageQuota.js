@@ -136,11 +136,11 @@ async function getUserStorageUsage(bucket, userId) {
     return cachedValue;
   }
 
-  const isUnlimited = getStorageLimitConfig(userId).isUnlimited;
+  /*const isUnlimited = getStorageLimitConfig(userId).isUnlimited;
   if (isUnlimited) {
     setUserStorageUsageCache(userId, 0);
     return 0;
-  }
+  }*/
 
   const usageFromFiles = await getUserStorageUsageFromFiles(bucket, userId);
   const usageFromMetadata = await readUserStorageUsageFromMetadata(bucket, userId);
