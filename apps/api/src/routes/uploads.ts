@@ -17,7 +17,7 @@ export async function registerUploadRoutes(app: FastifyInstance, context: AppCon
     return reply.code(201).send({ upload: { id: upload.id, nodeId: upload.nodeId, expiresAt: upload.expiresAt.toISOString() } });
   });
 
-  app.put("/v1/uploads/:uploadId/content", { bodyLimit: 100 * 1024 * 1024 * 1024, config: { rateLimit: false } }, async (request, reply) => {
+  app.put("/v1/uploads/:uploadId/content", { config: { rateLimit: false } }, async (request, reply) => {
     const user = await requireUser(request, context.firebase.auth);
     const { uploadId } = parse(z.object({ uploadId: idSchema }), request.params);
     const contentType = typeof request.headers["x-upload-content-type"] === "string" ? request.headers["x-upload-content-type"].slice(0, 255) : null;

@@ -26,7 +26,14 @@ export function sessionCookieOptions(config: AppConfig) {
 }
 
 export function csrfCookieOptions(config: AppConfig) {
-  return { path: "/", httpOnly: false, secure: secure(config), sameSite: "lax" as const, maxAge: 24 * 60 * 60 };
+  return {
+    ...(isProduction(config) ? { domain: ".uygarv.com" } : {}),
+    path: "/",
+    httpOnly: false,
+    secure: isProduction(config),
+    sameSite: "lax" as const,
+    maxAge: 24 * 60 * 60,
+  };
 }
 
 export function issueCsrfToken(reply: FastifyReply, config: AppConfig) {
