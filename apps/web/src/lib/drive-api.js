@@ -73,6 +73,7 @@ function normalizeFile(file) {
     contentType: file.contentType || null,
     previewUrl: file.previewUrl || null,
     trashedAt: file.trashedAt || null,
+    durationSeconds: file.durationSeconds || null,
   };
 }
 

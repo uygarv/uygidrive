@@ -6,7 +6,19 @@ import { ApiError } from "../lib/errors.js";
 import type { NodeRecord, UploadRecord } from "../types.js";
 import type { FirebaseServices } from "../plugins/firebase.js";
 
-export type StreamResult = { bytes: number; checksum: string };
+import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+
+export type StreamResult = {
+  bytes: number;
+  checksum: string;
+  durationSeconds?: number;
+};
+
 export type PreviewStreamResult = { stream: Readable; contentType: "image/webp" };
 
 const MAX_PREVIEW_SOURCE_BYTES = 50 * 1024 * 1024;
@@ -36,30 +48,188 @@ function isPreviewablePdf(node: NodeRecord) {
   return node.contentType?.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf";
 }
 
+function isPreviewableVideo(node: NodeRecord) {
+  if (/\.[^./]+$/.test(node.name)) {
+    return /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(node.name);
+  }
+
+  const contentType = node.contentType
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+
+  return contentType?.startsWith("video/") ?? false;
+}
+
+function isVideoContentType(contentType: string | null) {
+  return contentType
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase()
+    .startsWith("video/") ?? false;
+}
+
+function probeDuration(url: string) {
+  return new Promise<number | undefined>((resolve, reject) => {
+    const child = spawn(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        url,
+      ],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    child.once("error", reject);
+
+    child.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffprobe exited with code ${code}: ${stderr}`));
+        return;
+      }
+
+      const duration = Number.parseFloat(stdout.trim());
+
+      resolve(Number.isFinite(duration) ? duration : undefined);
+    });
+  });
+}
+
+function runFfmpegToStream(args: string[]): Readable {
+  const child = spawn("ffmpeg", args, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stderr = "";
+
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+
+    if (stderr.length > 10_000) {
+      stderr = stderr.slice(-10_000);
+    }
+  });
+
+  child.once("error", (error) => {
+    child.stdout.destroy(error);
+  });
+
+  child.once("close", (code) => {
+    if (code !== 0) {
+      child.stdout.destroy(
+        new Error(`ffmpeg exited with code ${code}: ${stderr}`),
+      );
+    }
+  });
+
+  return child.stdout;
+}
+
 export class StorageService {
   constructor(private readonly bucket: FirebaseServices["bucket"]) {}
 
-  async upload(upload: UploadRecord, source: Readable, contentType: string | null): Promise<StreamResult> {
+  async upload(
+    upload: UploadRecord,
+    source: Readable,
+    contentType: string | null,
+  ): Promise<StreamResult> {
     const file = this.bucket.file(upload.storageKey);
+
     let bytes = 0;
     const hash = createHash("sha256");
+
     const meter = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         bytes += chunk.length;
         hash.update(chunk);
-        if (bytes > upload.expectedBytes) callback(new ApiError(413, "UPLOAD_SIZE_EXCEEDED", "The upload exceeds its reserved size."));
-        else callback(null, chunk);
+
+        if (bytes > upload.expectedBytes) {
+          callback(
+            new ApiError(
+              413,
+              "UPLOAD_SIZE_EXCEEDED",
+              "The upload exceeds its reserved size.",
+            ),
+          );
+        } else {
+          callback(null, chunk);
+        }
       },
     });
+
     try {
-      await pipeline(source, meter, file.createWriteStream({
-        resumable: false,
-        metadata: { contentType: contentType || "application/octet-stream", metadata: { ownerId: upload.ownerId, nodeId: upload.nodeId } },
-      }));
-      if (bytes !== upload.expectedBytes) throw new ApiError(422, "UPLOAD_SIZE_MISMATCH", "The uploaded size did not match the reserved size.");
-      return { bytes, checksum: hash.digest("hex") };
+      await pipeline(
+        source,
+        meter,
+        file.createWriteStream({
+          resumable: false,
+          metadata: {
+            contentType: contentType || "application/octet-stream",
+            metadata: {
+              ownerId: upload.ownerId,
+              nodeId: upload.nodeId,
+            },
+          },
+        }),
+      );
+
+      if (bytes !== upload.expectedBytes) {
+        throw new ApiError(
+          422,
+          "UPLOAD_SIZE_MISMATCH",
+          "The uploaded size did not match its reserved size.",
+        );
+      }
+
+      let durationSeconds: number | undefined;
+
+      if (isVideoContentType(contentType)) {
+        try {
+          const [signedUrl] = await file.getSignedUrl({
+            version: "v4",
+            action: "read",
+            expires: Date.now() + 5 * 60 * 1000,
+          });
+
+          durationSeconds = await probeDuration(signedUrl);
+        } catch {
+          // Media metadata failing shouldn't make
+          // an otherwise valid upload fail.
+        }
+      }
+
+      return {
+        bytes,
+        checksum: hash.digest("hex"),
+        durationSeconds,
+      };
     } catch (error) {
-      await file.delete({ ignoreNotFound: true }).catch(() => undefined);
+      await file
+        .delete({ ignoreNotFound: true })
+        .catch(() => undefined);
+
       throw error;
     }
   }
@@ -70,7 +240,19 @@ export class StorageService {
   }
 
   async streamPreview(node: NodeRecord): Promise<PreviewStreamResult | null> {
-    if (!node.storageKey || node.kind !== "file" || node.sizeBytes > MAX_PREVIEW_SOURCE_BYTES || (!isPreviewableImage(node) && !isPreviewablePdf(node))) return null;
+    if (
+      !node.storageKey ||
+      node.kind !== "file" ||
+      node.sizeBytes > MAX_PREVIEW_SOURCE_BYTES ||
+      (
+        !isPreviewableImage(node) &&
+        !isPreviewablePdf(node) &&
+        !isPreviewableVideo(node)
+      )
+    ) {
+      return null;
+    }
+
     const preview = this.bucket.file(previewStorageKey(node));
     try {
       const [exists] = await preview.exists();
@@ -82,26 +264,120 @@ export class StorageService {
     }
   }
 
-  private async createPreview(node: NodeRecord, preview: ReturnType<FirebaseServices["bucket"]["file"]>) {
+  private async createVideoPreview(
+    node: NodeRecord,
+    preview: ReturnType<FirebaseServices["bucket"]["file"]>,
+  ) {
     if (!node.storageKey) return;
+
+    const source = this.bucket.file(node.storageKey);
+
+    const [signedUrl] = await source.getSignedUrl({
+      version: "v4",
+      action: "read",
+      expires: Date.now() + 5 * 60 * 1000,
+    });
+
+    const frameStream = runFfmpegToStream([
+      "-hide_banner",
+      "-loglevel",
+      "error",
+
+      "-ss",
+      "0.25",
+
+      "-i",
+      signedUrl,
+
+      "-frames:v",
+      "1",
+      "-an",
+
+      "-vf",
+      "scale=960:960:force_original_aspect_ratio=decrease",
+
+      "-f",
+      "image2pipe",
+      "-vcodec",
+      "png",
+      "pipe:1",
+    ]);
+
+    await pipeline(
+      frameStream,
+
+      sharp({
+        limitInputPixels: 40_000_000,
+      })
+        .rotate()
+        .resize({
+          width: 960,
+          height: 960,
+          fit: "inside",
+          withoutEnlargement: true,
+        })
+        .webp({ quality: 82 }),
+
+      preview.createWriteStream({
+        resumable: false,
+        metadata: {
+          contentType: PREVIEW_CONTENT_TYPE,
+          cacheControl: "private, max-age=86400",
+          metadata: {
+            ownerId: node.ownerId,
+            nodeId: node.id,
+            source: "video-preview",
+          },
+        },
+      }),
+    );
+  }
+
+  private async createPreview(
+    node: NodeRecord,
+    preview: ReturnType<FirebaseServices["bucket"]["file"]>,
+  ) {
+    if (!node.storageKey) return;
+
     try {
+      if (isPreviewableVideo(node)) {
+        await this.createVideoPreview(node, preview);
+        return;
+      }
+
       await pipeline(
         this.bucket.file(node.storageKey).createReadStream(),
-        sharp({ animated: false, density: isPreviewablePdf(node) ? 144 : 72, limitInputPixels: 40_000_000 })
+        sharp({
+          animated: false,
+          density: isPreviewablePdf(node) ? 144 : 72,
+          limitInputPixels: 40_000_000,
+        })
           .rotate()
-          .resize({ width: 960, height: 960, fit: "inside", withoutEnlargement: true })
+          .resize({
+            width: 960,
+            height: 960,
+            fit: "inside",
+            withoutEnlargement: true,
+          })
           .webp({ quality: 82 }),
         preview.createWriteStream({
           resumable: false,
           metadata: {
             contentType: PREVIEW_CONTENT_TYPE,
             cacheControl: "private, max-age=86400",
-            metadata: { ownerId: node.ownerId, nodeId: node.id, source: "preview" },
+            metadata: {
+              ownerId: node.ownerId,
+              nodeId: node.id,
+              source: "preview",
+            },
           },
         }),
       );
     } catch (error) {
-      await preview.delete({ ignoreNotFound: true }).catch(() => undefined);
+      await preview
+        .delete({ ignoreNotFound: true })
+        .catch(() => undefined);
+
       throw error;
     }
   }

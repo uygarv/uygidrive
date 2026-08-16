@@ -5,7 +5,7 @@ const SESSION_COOKIE = "uygidrive_session";
 /**
  * Next 16 renamed Middleware to Proxy. This is deliberately a fast cookie
  * presence check; the Drive workspace still verifies the cookie with the API
- * before it fetches any protected data.
+ * before it fetches any protected data. This is just for redirections and UI states.
  */
 export function proxy(request) {
   const developmentMock = process.env.NODE_ENV === "development" && request.nextUrl.searchParams.get("mock") === "1";

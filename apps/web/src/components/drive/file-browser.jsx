@@ -21,6 +21,7 @@ import {
   Share2Icon,
   Trash2Icon,
   RotateCcwIcon,
+  PlayIcon,
 } from "lucide-react";
 import {
   Empty,
@@ -56,15 +57,46 @@ const thumbnailContentTypes = new Set([
   "image/gif",
   "image/tiff",
   "application/pdf",
+
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-m4v",
+  "video/x-matroska",
+  "video/x-msvideo",
 ]);
 
 function isThumbnailFile(file) {
   if (file.type !== "file") return false;
-  const hasExtension = /\.[^./]+$/.test(file.name);
-  if (hasExtension) return /\.(avif|gif|jpe?g|pdf|png|tiff?|webp)$/i.test(file.name);
-  const contentType = file.contentType?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType && thumbnailContentTypes.has(contentType)) return true;
-  return false;
+
+  const contentType = file.contentType
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+
+  if (
+    contentType?.startsWith("image/") ||
+    contentType?.startsWith("video/") ||
+    contentType === "application/pdf"
+  ) {
+    return true;
+  }
+
+  return /\.(avif|gif|jpe?g|pdf|png|tiff?|webp|mp4|m4v|mov|webm|mkv|avi)$/i.test(
+    file.name,
+  );
+}
+
+function isVideoFile(file) {
+  const contentType = file.contentType
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+
+  return (
+    contentType?.startsWith("video/") ||
+    /\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(file.name)
+  );
 }
 
 function FileTypeIcon({ file, className }) {
@@ -89,6 +121,8 @@ function placeholderSurface(file, grid) {
 function FileThumbnail({ file, className, iconClassName, grid = false }) {
   const [didFail, setDidFail] = useState(false);
   const hasThumbnail = isThumbnailFile(file) && !didFail;
+  const isVideo = isVideoFile(file);
+
   return (
     <span
       className={cn(
@@ -98,6 +132,7 @@ function FileThumbnail({ file, className, iconClassName, grid = false }) {
       )}
     >
       <FileTypeIcon file={file} className={iconClassName} />
+
       {hasThumbnail && (
         <img
           src={file.previewUrl || driveApi.thumbnailUrl(file.id)}
@@ -108,6 +143,14 @@ function FileThumbnail({ file, className, iconClassName, grid = false }) {
           draggable="false"
           onError={() => setDidFail(true)}
         />
+      )}
+
+      {hasThumbnail && isVideo && grid && (
+        <span className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <span className="flex size-11 items-center justify-center rounded-full bg-black/45 text-white shadow-sm backdrop-blur-[2px]">
+            <PlayIcon className="size-5 fill-current" />
+          </span>
+        </span>
       )}
     </span>
   );
@@ -144,7 +187,7 @@ function FileActions({ file, isTrash, onDownload, onMove, onRename, onShare, onD
               </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={() => onDelete(file)}>
                 <Trash2Icon />
-                Delete permanently
+                Delete
               </DropdownMenuItem>
             </DropdownMenuGroup>
           ) : (
@@ -276,6 +319,20 @@ export function FileBrowser({
   function canDropOnFolder(file) {
     return Boolean(!isTrash && draggedFile && file.type === "folder" && file.id !== draggedFile.id && file.id !== draggedFile.parentId);
   }
+
+  function durationLabel(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return null;
+
+    const total = Math.floor(seconds);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+
+    return hours > 0
+      ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+      : `${minutes}:${String(secs).padStart(2, "0")}`;
+  }
+  
   if (isLoading)
     return (
       <BrowserSurface
@@ -347,6 +404,8 @@ export function FileBrowser({
         {files.map((file) => {
           const hasMediaPreview = isThumbnailFile(file);
           const isDropTarget = dropTargetId === file.id;
+          const duration = durationLabel(file.durationSeconds);
+
           return (
           <motion.article
             layout="position"
@@ -412,9 +471,11 @@ export function FileBrowser({
                 grid={view === "grid"}
                 className={cn(
                   view === "grid"
-                    ? hasMediaPreview
-                      ? "absolute inset-0 size-full rounded-none after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-32 after:bg-linear-to-t after:from-black/90 after:via-black/55 after:to-transparent"
-                      : "absolute inset-0 size-full rounded-none"
+                    ? file.type === "folder"
+                      ? "absolute inset-0 size-full rounded-none after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(to_top,rgba(15,23,42,0.48)_0%,rgba(15,23,42,0.34)_22%,rgba(20,30,55,0.20)_42%,rgba(30,41,75,0.09)_60%,rgba(30,41,75,0.025)_76%,transparent_90%)]"
+                      : hasMediaPreview
+                        ? "absolute inset-0 size-full rounded-none after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(to_top,rgba(0,0,0,0.70)_0%,rgba(0,0,0,0.52)_22%,rgba(0,0,0,0.32)_42%,rgba(0,0,0,0.14)_60%,rgba(0,0,0,0.04)_76%,transparent_90%)]"
+                        : "absolute inset-0 size-full rounded-none after:pointer-events-none after:absolute after:inset-0 after:bg-[linear-gradient(to_top,rgba(0,0,0,0.48)_0%,rgba(0,0,0,0.34)_22%,rgba(0,0,0,0.20)_42%,rgba(0,0,0,0.09)_60%,rgba(0,0,0,0.025)_76%,transparent_90%)]"
                     : "size-9 rounded-lg",
                 )}
                 iconClassName={view === "grid" ? "size-12" : "size-4"}
@@ -422,16 +483,23 @@ export function FileBrowser({
               <span className={cn(
                 "min-w-0 flex-1 text-foreground",
                 view === "grid" && "absolute inset-x-0 bottom-0 z-10 px-3 pb-3 pt-10",
-                view === "grid" && hasMediaPreview && "text-white",
+                view === "grid" && true && "text-white", //
               )}>
                 <span className="block truncate text-sm font-medium">
                   {file.name}
                 </span>
                 <span className={cn(
                   "mt-0.5 block text-xs text-foreground",
-                  view === "grid" && hasMediaPreview && "text-white",
+                  view === "grid" && true && "text-white", //hasMediaPreview
                 )}>
-                  {file.type === "folder" ? "Folder" : file.size}
+                  {file.type === "folder" ? (
+                    "Folder"
+                  ) : (
+                    <>
+                      {file.size}
+                      {duration && <> · {duration}</>}
+                    </>
+                  )}
                 </span>
               </span>
             </button>

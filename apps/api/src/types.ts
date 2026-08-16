@@ -28,6 +28,7 @@ export type NodeRecord = {
   createdAt: Date;
   updatedAt: Date;
   trashedAt: Date | null;
+  durationSeconds?: number;
 };
 
 export type ShareRecord = {

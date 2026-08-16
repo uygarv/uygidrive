@@ -40,7 +40,7 @@ export interface DriveRepository {
   createUpload(input: CreateUploadInput): Promise<UploadRecord>;
   getUpload(ownerId: string, uploadId: string): Promise<UploadRecord | null>;
   markUploadStreaming(ownerId: string, uploadId: string): Promise<UploadRecord>;
-  completeUpload(ownerId: string, uploadId: string, receivedBytes: number, checksum: string | null): Promise<NodeRecord>;
+  completeUpload(ownerId: string, uploadId: string, receivedBytes: number, checksum: string | null, durationSeconds?: number,): Promise<NodeRecord>;
   failUpload(ownerId: string, uploadId: string): Promise<UploadRecord | null>;
   createShare(input: { id: string; nodeId: string; ownerId: string; mode: ShareMode; publicId: string | null; tokenHash: string | null; recipientId: string | null; expiresAt: Date | null }): Promise<ShareRecord>;
   listShares(ownerId: string, nodeId: string): Promise<ShareRecord[]>;

@@ -52,6 +52,7 @@ function toNode(snapshot: DocumentSnapshot<DocumentData>): NodeRecord {
     createdAt: toDate(data.createdAt),
     updatedAt: toDate(data.updatedAt),
     trashedAt: data.trashedAt ? toDate(data.trashedAt) : null,
+    durationSeconds: data.durationSeconds,
   };
 }
 
@@ -366,21 +367,67 @@ export class FirestoreDriveRepository implements DriveRepository {
     return toUpload(await ref.get());
   }
 
-  async completeUpload(ownerId: string, uploadId: string, receivedBytes: number, checksum: string | null) {
+  async completeUpload(
+    ownerId: string,
+    uploadId: string,
+    receivedBytes: number,
+    checksum: string | null,
+    durationSeconds?: number,
+  ) {
     const uploadRef = this.uploadRef(uploadId);
+
     await this.firestore.runTransaction(async (transaction) => {
       const uploadSnapshot = await transaction.get(uploadRef);
       const upload = toUpload(uploadSnapshot);
-      if (upload.ownerId !== ownerId || upload.status !== "streaming") throw new ApiError(409, "UPLOAD_UNAVAILABLE", "This upload cannot be completed.");
-      if (receivedBytes !== upload.expectedBytes) throw new ApiError(422, "UPLOAD_SIZE_MISMATCH", "The uploaded size did not match the reserved size.");
+
+      if (upload.ownerId !== ownerId || upload.status !== "streaming") {
+        throw new ApiError(
+          409,
+          "UPLOAD_UNAVAILABLE",
+          "This upload cannot be completed.",
+        );
+      }
+
+      if (receivedBytes !== upload.expectedBytes) {
+        throw new ApiError(
+          422,
+          "UPLOAD_SIZE_MISMATCH",
+          "The uploaded size did not match the reserved size.",
+        );
+      }
+
       const userRef = this.userRef(ownerId);
       const user = toUser(await transaction.get(userRef));
-      transaction.update(this.nodeRef(upload.nodeId), { status: "active", sizeBytes: receivedBytes, checksum, updatedAt: new Date() });
-      transaction.update(uploadRef, { status: "completed", receivedBytes, updatedAt: new Date() });
-      transaction.update(userRef, { storageReservedBytes: Math.max(0, user.storageReservedBytes - upload.expectedBytes), storageUsedBytes: user.storageUsedBytes + receivedBytes, updatedAt: new Date() });
+
+      transaction.update(this.nodeRef(upload.nodeId), {
+        status: "active",
+        sizeBytes: receivedBytes,
+        checksum,
+        durationSeconds: durationSeconds ?? null,
+        updatedAt: new Date(),
+      });
+
+      transaction.update(uploadRef, {
+        status: "completed",
+        receivedBytes,
+        updatedAt: new Date(),
+      });
+
+      transaction.update(userRef, {
+        storageReservedBytes: Math.max(
+          0,
+          user.storageReservedBytes - upload.expectedBytes,
+        ),
+        storageUsedBytes: user.storageUsedBytes + receivedBytes,
+        updatedAt: new Date(),
+      });
     });
+
     const upload = toUpload(await uploadRef.get());
-    return toNode(await this.nodeRef(upload.nodeId).get());
+
+    return toNode(
+      await this.nodeRef(upload.nodeId).get(),
+    );
   }
 
   async failUpload(ownerId: string, uploadId: string) {

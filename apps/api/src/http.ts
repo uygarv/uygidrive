@@ -13,6 +13,7 @@ export function nodeResponse(node: NodeRecord) {
     createdAt: node.createdAt.toISOString(),
     updatedAt: node.updatedAt.toISOString(),
     trashedAt: node.trashedAt?.toISOString() ?? null,
+    durationSeconds: node.durationSeconds
   };
 }
 

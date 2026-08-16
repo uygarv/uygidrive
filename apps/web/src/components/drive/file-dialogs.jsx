@@ -1315,7 +1315,7 @@ export function PreviewDialog({ file, files = [], onClose, onSelect }) {
   }
   return (
     <Dialog open={Boolean(file) && !closingFile} onOpenChange={(open) => !open && requestClose()}>
-      <DialogContent keepMounted showCloseButton={false} className={cn("inset-0 top-0 left-0 z-50 grid h-svh w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none bg-background/45 p-0 backdrop-blur-sm data-open:slide-in-from-bottom-2 data-closed:slide-out-to-bottom-2 sm:max-w-none", activeIndex >= 0 ? "grid-rows-[auto_minmax(0,1fr)_auto]" : "grid-rows-[auto_minmax(0,1fr)]")}>
+      <DialogContent keepMounted showCloseButton={false} className={cn("inset-0 top-0 left-0 z-50 grid h-dvh w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none bg-background/45 p-0 backdrop-blur-sm data-open:slide-in-from-bottom-2 data-closed:slide-out-to-bottom-2 sm:max-w-none", activeIndex >= 0 ? "grid-rows-[auto_minmax(0,1fr)_auto]" : "grid-rows-[auto_minmax(0,1fr)]")}>
         <DialogHeader className="flex-row items-center gap-3 border-b bg-background/40 px-3 py-2 sm:px-5">
           <Button variant="ghost" size="icon" onClick={requestClose} aria-label="Close preview" title="Close preview"><XIcon /></Button>
           <div className="min-w-0 flex-1">

@@ -23,6 +23,7 @@
     "@napi-rs/canvas": "^1.0.6",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
+    "ffmpeg": "^0.0.4",
     "firebase-admin": "^13.0.2",
     "jose": "^6.2.8",
     "pdfjs-dist": "^5.6.205",
