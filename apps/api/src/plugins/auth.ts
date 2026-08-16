@@ -11,23 +11,11 @@ export const CSRF_COOKIE = "uygidrive_csrf";
 function secure(config: AppConfig) { return config.environment === "production"; }
 
 export function sessionCookieOptions(config: AppConfig) {
-  return {
-    path: "/",
-    httpOnly: true,
-    secure: true,
-    sameSite: "none" as const,
-    maxAge: 5 * 24 * 60 * 60,
-  };
+  return { path: "/", httpOnly: true, secure: secure(config), sameSite: "lax" as const, maxAge: 5 * 24 * 60 * 60 };
 }
 
 export function csrfCookieOptions(config: AppConfig) {
-  return {
-    path: "/",
-    httpOnly: false,
-    secure: true,
-    sameSite: "none" as const,
-    maxAge: 24 * 60 * 60,
-  };
+  return { path: "/", httpOnly: false, secure: secure(config), sameSite: "lax" as const, maxAge: 24 * 60 * 60 };
 }
 
 export function issueCsrfToken(reply: FastifyReply, config: AppConfig) {
