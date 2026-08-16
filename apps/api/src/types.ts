@@ -1,0 +1,71 @@
+export type NodeKind = "file" | "folder";
+export type NodeStatus = "active" | "uploading" | "trashed";
+export type ShareMode = "public" | "link" | "recipient";
+
+export type UserRecord = {
+  id: string;
+  email: string;
+  storageLimitBytes: number;
+  storageUsedBytes: number;
+  storageReservedBytes: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type NodeRecord = {
+  id: string;
+  ownerId: string;
+  parentId: string | null;
+  kind: NodeKind;
+  status: NodeStatus;
+  name: string;
+  nameNormalized: string;
+  storageKey: string | null;
+  legacyStoragePath: string | null;
+  sizeBytes: number;
+  contentType: string | null;
+  checksum: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  trashedAt: Date | null;
+};
+
+export type ShareRecord = {
+  id: string;
+  nodeId: string;
+  ownerId: string;
+  mode: ShareMode;
+  publicId: string | null;
+  tokenHash: string | null;
+  recipientId: string | null;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type UploadRecord = {
+  id: string;
+  ownerId: string;
+  nodeId: string;
+  parentId: string | null;
+  name: string;
+  contentType: string | null;
+  expectedBytes: number;
+  receivedBytes: number;
+  storageKey: string;
+  status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type AuthenticatedUser = {
+  uid: string;
+  email: string | null;
+};
+
+export type Page<T> = {
+  items: T[];
+  nextCursor: string | null;
+};

@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Fastify is the sole data boundary. Firebase Admin ignores rules, while all
+    // direct browser SDK requests are denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -150,6 +150,34 @@ header {
   }
 }
 
+@media (max-width: 991.98px) {
+    .navbar-nav {
+        width: 100%;
+        align-items: flex-end;
+    }
+
+    .navbar-nav .nav-item {
+        width: auto;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .navbar-nav .email {
+        width: auto;
+        text-align: center !important;
+        padding: 10px 15px;
+        margin: 0 !important;
+    }
+
+    .navbar-nav #logout-btn {
+        width: auto;
+        margin: 8px 15px 12px;
+        padding: 5px 12px;
+        text-align: center;
+    }
+}
+
 .dropdown-menu {
    right: auto !important;
    left: 0 !important;
@@ -171,6 +199,38 @@ header {
 
 .embed {
   height: 400px;
+}
+
+#logout-btn {
+    align-self: center;
+    margin-right: 20px;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+}
+
+.btn-background {
+    color: white !important;
+    text-decoration: none;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: inline-block;
+    margin-right: 20px;
+}
+
+.btn-background[data-color="red"] {
+    background-color: #ff0019d7;
+}
+
+.btn-background:hover {
+    color: white;
+    text-decoration: none;
+    filter: brightness(90%);
 }
 
 .btn-gradient {
