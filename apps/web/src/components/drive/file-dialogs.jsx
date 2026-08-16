@@ -942,6 +942,7 @@ function VideoPreview({ url, onReady, onError, onNavigationToneChange }) {
     >
       <video
         ref={videoRef}
+        playsInline
         className="size-full object-contain"
         src={url}
         onLoadedData={() => { onReady(); updateNavigationTone(); }}
