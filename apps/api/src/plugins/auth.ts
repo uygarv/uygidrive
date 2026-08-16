@@ -37,8 +37,25 @@ export function csrfCookieOptions(config: AppConfig) {
 }
 
 export function issueCsrfToken(reply: FastifyReply, config: AppConfig) {
+  // remove the old host cookie
+  if (isProduction(config)) {
+    reply.clearCookie(CSRF_COOKIE, {
+      path: "/",
+      httpOnly: false,
+      secure: true,
+      sameSite: "lax",
+    });
+  }
+
+  // create the new domain cookie
   const token = randomBytes(32).toString("base64url");
-  reply.setCookie(CSRF_COOKIE, token, csrfCookieOptions(config));
+
+  reply.setCookie(
+    CSRF_COOKIE,
+    token,
+    csrfCookieOptions(config),
+  );
+
   return token;
 }
 

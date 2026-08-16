@@ -2,8 +2,8 @@ import "./globals.css";
 import { Providers } from "@/app/providers";
 
 export const metadata = {
-  title: "UygiDrive | Your files, organized",
-  description: "A calm, capable place to store, find, preview, and share your files.",
+  title: "UygiDrive | Simpliest access to your files",
+  description: "A capable place to store and share your files.",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
   },
