@@ -18,7 +18,7 @@
   },
   "name": "uygidrive",
   "version": "0.0.3",
-  "description": "a node.js server with express.js for cloud storage service",
+  "description": "a express.js server with for cloud storage service",
   "main": "api/index.js",
   "devDependencies": {
     "uglify-js": "^3.17.4"

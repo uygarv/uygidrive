@@ -11,7 +11,14 @@ export const CSRF_COOKIE = "uygidrive_csrf";
 function secure(config: AppConfig) { return config.environment === "production"; }
 
 export function sessionCookieOptions(config: AppConfig) {
-  return { path: "/", httpOnly: true, secure: secure(config), sameSite: "lax" as const, maxAge: 5 * 24 * 60 * 60 };
+  return {
+    domain: ".uygarv.com",
+    path: "/",
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax" as const,
+    maxAge: 5 * 24 * 60 * 60,
+  };
 }
 
 export function csrfCookieOptions(config: AppConfig) {
