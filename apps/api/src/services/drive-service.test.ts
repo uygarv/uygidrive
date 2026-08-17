@@ -9,7 +9,7 @@ import { UPLOAD_CHUNK_BYTES } from "./storage-service.js";
 import { Readable } from "node:stream";
 
 const now = new Date();
-const folder: NodeRecord = { id: "fld_123456789012", ownerId: "user", parentId: null, kind: "folder", status: "trashed", name: "Folder", nameNormalized: "folder", storageKey: null, legacyStoragePath: null, sizeBytes: 0, contentType: null, checksum: null, createdAt: now, updatedAt: now, trashedAt: now };
+const folder: NodeRecord = { id: "fld_123456789012", ownerId: "user", parentId: null, kind: "folder", status: "trashed", name: "Folder", nameNormalized: "folder", storageKey: null, legacyStoragePath: null, sizeBytes: 0, contentType: null, checksum: null, createdAt: now, updatedAt: now, trashedAt: now, accessMode: "private" };
 const child: NodeRecord = { ...folder, id: "fil_123456789012", parentId: folder.id, kind: "file", name: "Child", nameNormalized: "child", storageKey: "objects/user/child" };
 const file: NodeRecord = { ...child, id: "fil_abcdefghijkl", parentId: null, name: "File", nameNormalized: "file", storageKey: "objects/user/file" };
 
@@ -44,7 +44,7 @@ test("purges only expired trash roots and permanently removes their stored files
 
 test("forwards an aligned 16 MiB chunk and persists Storage's acknowledged offset", async () => {
   const upload: UploadRecord = {
-    id: "upl_123456789012", ownerId: "user", nodeId: "fil_123456789012", parentId: null,
+    id: "upl_123456789012", ownerId: "user", actorId: "user", nodeId: "fil_123456789012", parentId: null,
     name: "video.mp4", contentType: "video/mp4", expectedBytes: UPLOAD_CHUNK_BYTES * 2,
     receivedBytes: 0, storageKey: "objects/user/file/original", resumableSessionUri: "https://storage.example/session",
     status: "pending", expiresAt: new Date(Date.now() + 60_000), createdAt: now, updatedAt: now,
@@ -73,7 +73,7 @@ test("forwards an aligned 16 MiB chunk and persists Storage's acknowledged offse
 
 test("rejects a non-final chunk that is not 16 MiB", async () => {
   const upload: UploadRecord = {
-    id: "upl_abcdefghijkl", ownerId: "user", nodeId: "fil_abcdefghijkl", parentId: null,
+    id: "upl_abcdefghijkl", ownerId: "user", actorId: "user", nodeId: "fil_abcdefghijkl", parentId: null,
     name: "video.mp4", contentType: "video/mp4", expectedBytes: UPLOAD_CHUNK_BYTES * 2,
     receivedBytes: 0, storageKey: "objects/user/file/original", resumableSessionUri: "https://storage.example/session",
     status: "pending", expiresAt: new Date(Date.now() + 60_000), createdAt: now, updatedAt: now,

@@ -13,6 +13,18 @@ import { cn } from "@/lib/utils";
 
 const UPLOAD_QUEUE_STORAGE_KEY = "uygidrive.pending-uploads.v1";
 
+function clientUploadId() {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+  const values = new Uint32Array(2);
+  if (typeof cryptoApi?.getRandomValues === "function") cryptoApi.getRandomValues(values);
+  else {
+    values[0] = Math.floor(Math.random() * 0xffffffff);
+    values[1] = Math.floor(Math.random() * 0xffffffff);
+  }
+  return `${Date.now().toString(36)}-${values[0].toString(36)}${values[1].toString(36)}`;
+}
+
 function savedUploads() {
   try {
     const value = JSON.parse(window.localStorage.getItem(UPLOAD_QUEUE_STORAGE_KEY) || "[]");
@@ -81,7 +93,7 @@ export function UploadDialog({ open, onOpenChange, parentId, onComplete, onUploa
   function queueFiles(fileList) {
     const files = Array.from(fileList || []);
     if (!files.length) return;
-    const queued = files.map((file) => ({ id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`, file, name: file.name, sizeBytes: file.size, lastModified: file.lastModified, contentType: file.type || null, parentId, receivedBytes: 0, progress: 0, state: "uploading" }));
+    const queued = files.map((file) => ({ id: `${file.name}-${file.lastModified}-${clientUploadId()}`, file, name: file.name, sizeBytes: file.size, lastModified: file.lastModified, contentType: file.type || null, parentId, receivedBytes: 0, progress: 0, state: "uploading" }));
     setUploads((current) => [...current, ...queued]);
     queued.forEach(({ id, file }) => startUpload(id, file));
   }

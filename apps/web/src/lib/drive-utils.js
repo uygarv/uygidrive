@@ -22,6 +22,7 @@ export function previewKind(name) {
   if (["mp4", "webm", "mov"].includes(extension)) return "video";
   if (["mp3", "wav", "ogg", "m4a"].includes(extension)) return "audio";
   if (["pdf", "txt", "json"].includes(extension)) return "embed";
+  if (["js", "jsx", "ts", "tsx", "mjs", "cjs", "lua", "py", "rb", "php", "java", "c", "cc", "cpp", "cs", "go", "rs", "swift", "kt", "kts", "sh", "bash", "zsh", "fish", "html", "css", "scss", "sass", "less", "vue", "svelte", "xml", "yaml", "yml", "toml", "sql", "md", "mdx", "graphql", "gql", "dockerfile"].includes(extension) || name.toLowerCase() === "dockerfile") return "code";
   return "download";
 }
 

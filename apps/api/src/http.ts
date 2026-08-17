@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { NodeRecord } from "./types.js";
+import type { NodeRecord, UserRecord } from "./types.js";
 import type { DriveService } from "./services/drive-service.js";
 
 export function nodeResponse(node: NodeRecord) {
@@ -13,8 +13,13 @@ export function nodeResponse(node: NodeRecord) {
     createdAt: node.createdAt.toISOString(),
     updatedAt: node.updatedAt.toISOString(),
     trashedAt: node.trashedAt?.toISOString() ?? null,
-    durationSeconds: node.durationSeconds
+    durationSeconds: node.durationSeconds,
+    accessMode: node.accessMode,
   };
+}
+
+export function userIdentityResponse(user: Pick<UserRecord, "id" | "username" | "avatarVersion">) {
+  return { id: user.id, username: user.username, avatarUrl: user.avatarVersion ? `/v1/users/${encodeURIComponent(user.id)}/avatar?v=${encodeURIComponent(user.avatarVersion)}` : null };
 }
 
 function attachmentHeader(name: string) {
@@ -24,8 +29,12 @@ function attachmentHeader(name: string) {
 
 export async function sendNodeContent(request: FastifyRequest, reply: FastifyReply, drive: DriveService, node: NodeRecord, download = false) {
   const result = await drive.stream(node, { range: request.headers.range, download });
-  reply.code(result.statusCode).header("accept-ranges", "bytes").header("content-type", result.contentType).header("content-length", String(result.end === null ? result.size : result.end - result.start! + 1)).header("x-content-type-options", "nosniff");
-  if (result.start !== null && result.end !== null) reply.header("content-range", `bytes ${result.start}-${result.end}/${result.size}`);
+  reply.code(result.statusCode).header("accept-ranges", "bytes").header("content-type", result.contentType).header("x-content-type-options", "nosniff");
+  if (result.start !== null && result.end !== null) {
+    reply.header("content-length", String(result.end - result.start + 1));
+    reply.header("content-range", `bytes ${result.start}-${result.end}/${result.size}`);
+  }
   if (download || !result.inlineSafe) reply.header("content-disposition", attachmentHeader(node.name));
+  result.stream.once("error", (error) => request.log.error({ err: error, nodeId: node.id }, "Cloud Storage download stream failed"));
   return reply.send(result.stream);
 }

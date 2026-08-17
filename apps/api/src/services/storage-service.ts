@@ -177,6 +177,35 @@ export class StorageService {
     return uri;
   }
 
+  private avatarKey(userId: string) { return `avatars/${userId}.webp`; }
+
+  async saveAvatar(userId: string, source: Readable) {
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of source) {
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += value.length;
+      if (bytes > 10 * 1024 * 1024) throw new ApiError(413, "AVATAR_TOO_LARGE", "Profile photos must be 10 MB or smaller.");
+      chunks.push(value);
+    }
+    if (!bytes) throw new ApiError(422, "INVALID_AVATAR", "Choose an image for your profile photo.");
+    let avatar: Buffer;
+    try {
+      avatar = await sharp(Buffer.concat(chunks)).rotate().resize(512, 512, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
+    } catch {
+      throw new ApiError(422, "INVALID_AVATAR", "Profile photos must be valid images.");
+    }
+    await this.bucket.file(this.avatarKey(userId)).save(avatar, { contentType: "image/webp", resumable: false, metadata: { cacheControl: "private, max-age=86400" } });
+  }
+
+  async deleteAvatar(userId: string) { await this.bucket.file(this.avatarKey(userId)).delete({ ignoreNotFound: true }); }
+
+  async streamAvatar(userId: string) {
+    const file = this.bucket.file(this.avatarKey(userId));
+    const [exists] = await file.exists();
+    return exists ? file.createReadStream() : null;
+  }
+
   private requestResumable(uri: string, options: Record<string, unknown>) {
     return this.authClient().request({
       url: uri,
@@ -473,7 +502,7 @@ export class StorageService {
       const size = Number(metadata.size ?? node.sizeBytes);
       const contentType = metadata.contentType || node.contentType || "application/octet-stream";
       const download = Boolean(options.download);
-      const range = !download ? parseRange(options.range, size) : null;
+      const range = parseRange(options.range, size);
       return {
         stream: file.createReadStream(range ? { start: range.start, end: range.end } : undefined),
         statusCode: range ? 206 : 200,
@@ -505,7 +534,8 @@ function parseRange(header: string | undefined, size: number) {
   const end = endValue ? Number(endValue) : undefined;
   if ((!Number.isInteger(start) && start !== undefined) || (!Number.isInteger(end) && end !== undefined)) throw new ApiError(416, "INVALID_RANGE", "The requested range is invalid.", { size });
   const resolvedStart = start ?? Math.max(0, size - (end ?? 0));
-  const resolvedEnd = end ?? size - 1;
-  if (resolvedStart < 0 || resolvedStart >= size || resolvedEnd < resolvedStart || resolvedEnd >= size) throw new ApiError(416, "INVALID_RANGE", "The requested range is invalid.", { size });
+  // RFC 9110 permits a range end beyond EOF; the response simply ends at EOF.
+  const resolvedEnd = Math.min(end ?? size - 1, size - 1);
+  if (resolvedStart < 0 || resolvedStart >= size || resolvedEnd < resolvedStart) throw new ApiError(416, "INVALID_RANGE", "The requested range is invalid.", { size });
   return { start: resolvedStart, end: resolvedEnd };
 }

@@ -1,7 +1,8 @@
 import { ApiError } from "../lib/errors.js";
 import { id } from "../lib/ids.js";
 import { safeFileName } from "../lib/format.js";
-import type { NodeRecord, UploadRecord } from "../types.js";
+import type { AccessMode, NodeRecord, UploadRecord } from "../types.js";
+import type { Readable } from "node:stream";
 import type { DriveRepository, ListNodesInput } from "../repositories/drive-repository.js";
 import { StorageService, UPLOAD_CHUNK_ALIGNMENT, UPLOAD_CHUNK_BYTES } from "./storage-service.js";
 
@@ -19,7 +20,11 @@ export class DriveService {
   async createFolder(ownerId: string, parentId: string | null, rawName: string) {
     const name = safeFileName(rawName);
     if (!name) throw new ApiError(422, "INVALID_NAME", "Choose a name without slashes or control characters.");
-    return this.repository.createFolder({ id: id("fld"), ownerId, parentId, name });
+    if (!parentId) return this.repository.createFolder({ id: id("fld"), ownerId, parentId, name });
+    const parent = await this.repository.getNode(parentId);
+    const access = parent ? await this.repository.getRecipientAccess(ownerId, parentId) : null;
+    if (!parent || !access || parent.kind !== "folder" || access.role === "viewer") throw new ApiError(403, "EDITOR_REQUIRED", "You can only create folders in an editable shared folder.");
+    return this.repository.createFolder({ id: id("fld"), ownerId: parent.ownerId, parentId, name });
   }
 
   async updateNode(ownerId: string, nodeId: string, input: { name?: string; parentId?: string | null }) {
@@ -29,10 +34,29 @@ export class DriveService {
       if (!validatedName) throw new ApiError(422, "INVALID_NAME", "Choose a name without slashes or control characters.");
       name = validatedName;
     }
-    return this.repository.updateNode({ ownerId, nodeId, name, parentId: input.parentId });
+    const node = await this.repository.getNode(nodeId);
+    const access = node ? await this.repository.getRecipientAccess(ownerId, nodeId) : null;
+    if (!node || !access) throw new ApiError(404, "NOT_FOUND", "The item does not exist.");
+    if (access.role === "owner") return this.repository.updateNode({ ownerId, nodeId, name, parentId: input.parentId });
+    if (access.role !== "editor" || nodeId === access.rootId) throw new ApiError(403, "EDITOR_REQUIRED", "You cannot change this shared item.");
+    if (input.parentId !== undefined) {
+      if (!input.parentId) throw new ApiError(403, "SHARED_MOVE_RESTRICTED", "Shared items must stay inside the shared folder.");
+      const destination = await this.repository.getRecipientAccess(ownerId, input.parentId);
+      if (!destination || destination.role !== "editor" || destination.rootId !== access.rootId) throw new ApiError(403, "SHARED_MOVE_RESTRICTED", "Shared items can only move within the shared folder.");
+    }
+    return this.repository.updateNode({ ownerId: node.ownerId, nodeId, name, parentId: input.parentId });
   }
 
   async deleteNode(ownerId: string, nodeId: string, permanent: boolean) {
+    const target = await this.repository.getNode(nodeId);
+    const access = target ? await this.repository.getRecipientAccess(ownerId, nodeId) : null;
+    if (target && access && access.role === "editor" && target.ownerId !== ownerId) {
+      if (nodeId === access.rootId) throw new ApiError(403, "EDITOR_REQUIRED", "You cannot delete the shared folder itself.");
+      const nodes = await this.repository.permanentlyDeleteNodes(target.ownerId, nodeId);
+      await Promise.all(nodes.filter((node) => node.kind === "file").map((node) => this.storage.delete(node)));
+      await this.repository.finalizePermanentDelete(target.ownerId, nodes);
+      return nodes;
+    }
     if (!permanent) return this.repository.trashNode(ownerId, nodeId);
     const node = await this.repository.getNodeForOwner(ownerId, nodeId, ["trashed"]);
     if (!node) throw new ApiError(404, "NOT_FOUND", "The item does not exist in Trash.");
@@ -43,6 +67,11 @@ export class DriveService {
   }
 
   restoreNode(ownerId: string, nodeId: string) { return this.repository.restoreNode(ownerId, nodeId); }
+  setNodeAccess(ownerId: string, nodeId: string, accessMode: AccessMode) { return this.repository.setNodeAccess(ownerId, nodeId, accessMode); }
+  findUsers(query: string) { return this.repository.findUsers(query); }
+  async setAvatar(ownerId: string, source: Readable) { await this.storage.saveAvatar(ownerId, source); return this.repository.setAvatarVersion(ownerId, new Date().toISOString()); }
+  async deleteAvatar(ownerId: string) { await this.storage.deleteAvatar(ownerId); return this.repository.setAvatarVersion(ownerId, null); }
+  streamAvatar(userId: string) { return this.storage.streamAvatar(userId); }
 
   async purgeExpiredTrash(retentionDays: number, batchSize = 100) {
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1_000);
@@ -65,14 +94,22 @@ export class DriveService {
     const name = safeFileName(input.name);
     if (!name) throw new ApiError(422, "INVALID_NAME", "Choose a name without slashes or control characters.");
     if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0) throw new ApiError(422, "INVALID_SIZE", "File size is invalid.");
+    let storageOwnerId = ownerId;
+    if (input.parentId) {
+      const parent = await this.repository.getNode(input.parentId);
+      const access = parent ? await this.repository.getRecipientAccess(ownerId, input.parentId) : null;
+      if (!parent || !access || parent.kind !== "folder" || access.role === "viewer") throw new ApiError(403, "EDITOR_REQUIRED", "You can only upload to an editable shared folder.");
+      storageOwnerId = parent.ownerId;
+    }
     const nodeId = id("fil");
     const uploadId = id("upl");
-    const storageKey = `objects/${ownerId}/${nodeId}/original`;
-    const resumableSessionUri = await this.storage.createResumableUpload({ storageKey, contentType: input.contentType, ownerId, nodeId });
+    const storageKey = `objects/${storageOwnerId}/${nodeId}/original`;
+    const resumableSessionUri = await this.storage.createResumableUpload({ storageKey, contentType: input.contentType, ownerId: storageOwnerId, nodeId });
     try {
       return await this.repository.createUpload({
       id: uploadId,
-      ownerId,
+      ownerId: storageOwnerId,
+      actorId: ownerId,
       parentId: input.parentId,
       nodeId,
       name,
@@ -141,7 +178,7 @@ export class DriveService {
     const candidates = await this.repository.listExpiredUploads(new Date(), batchSize);
     await Promise.all(candidates.map(async (upload) => {
       await this.storage.cancelResumableUpload(upload).catch(() => undefined);
-      await this.repository.cancelUpload(upload.ownerId, upload.id);
+      await this.repository.cancelUpload(upload.actorId, upload.id);
     }));
     return { candidates: candidates.length };
   }
@@ -152,10 +189,13 @@ export class DriveService {
   listTrash(ownerId: string, cursor?: string | null, pageSize?: number) { return this.repository.listTrash(ownerId, cursor, pageSize); }
   listFavorites(ownerId: string) { return this.repository.listFavorites(ownerId); }
   listShared(ownerId: string) { return this.repository.listSharedWithUser(ownerId); }
+  recordSharedOpen: DriveRepository["recordSharedOpen"] = (input) => this.repository.recordSharedOpen(input);
+  getRecipientAccess(userId: string, nodeId: string) { return this.repository.getRecipientAccess(userId, nodeId); }
   setFavorite(ownerId: string, nodeId: string, enabled: boolean) { return this.repository.setFavorite(ownerId, nodeId, enabled); }
   listShares(ownerId: string, nodeId: string) { return this.repository.listShares(ownerId, nodeId); }
   createShare: DriveRepository["createShare"] = (input) => this.repository.createShare(input);
   revokeShare(ownerId: string, shareId: string) { return this.repository.revokeShare(ownerId, shareId); }
+  updateShareRole(ownerId: string, shareId: string, role: "viewer" | "editor") { return this.repository.updateShareRole(ownerId, shareId, role); }
   resolvePublicShare(publicId: string) { return this.repository.resolvePublicShare(publicId); }
   resolveTokenShare(tokenHash: string) { return this.repository.resolveTokenShare(tokenHash); }
   findPublicShare(nodeId: string) { return this.repository.findPublicShare(nodeId); }

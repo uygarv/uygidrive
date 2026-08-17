@@ -26,6 +26,7 @@ import {
   XIcon,
   ZoomInIcon,
   ZoomOutIcon,
+  UserRoundIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -86,6 +87,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { driveApi } from "@/lib/drive-api";
 import { previewKind } from "@/lib/drive-utils";
 import { cn } from "@/lib/utils";
+import { IdentityAvatar } from "@/components/identity-avatar";
 
 function fileExtension(name) {
   const lastDot = name.lastIndexOf(".");
@@ -412,71 +414,66 @@ export function DeleteDialog({ file, onClose, onDelete, permanent = false }) {
   );
 }
 
-export function ShareDialog({ file, onClose }) {
+export function ShareDialog({ file, closing = false, onClose }) {
   return (
-    <Dialog open={Boolean(file)} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={Boolean(file) && !closing} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       {file && <ShareContent key={file.id} file={file} onClose={onClose} />}
     </Dialog>
   );
 }
 
 function ShareContent({ file, onClose }) {
-  const [visibility, setVisibility] = useState("private");
-  const [privateUrl, setPrivateUrl] = useState("");
-  const [publicUrl, setPublicUrl] = useState("");
-  const [publicShareId, setPublicShareId] = useState("");
-  const [privateExpiry, setPrivateExpiry] = useState("7d");
-  const [privateExpiresAt, setPrivateExpiresAt] = useState("");
+  const [visibility, setVisibility] = useState(file.accessMode || "private");
+  const [linkExpiry, setLinkExpiry] = useState("7d");
+  const [createdLink, setCreatedLink] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [recipientResults, setRecipientResults] = useState([]);
+  const [newRecipientRole, setNewRecipientRole] = useState("viewer");
+  const [recipients, setRecipients] = useState([]);
+  const [pendingRecipient, setPendingRecipient] = useState(null);
+  const initializedShareFileId = useRef(null);
   const reduceMotion = useReducedMotion();
   useEffect(() => {
-    let active = true;
+    if (initializedShareFileId.current === file.id) return undefined;
+    initializedShareFileId.current = file.id;
     driveApi
       .listShares(file.id)
       .then((result) => {
-        if (!active) return;
-        const publicShare = result.shares?.find(
-          (share) => share.mode === "public" && !share.revokedAt,
-        );
-        setVisibility(publicShare ? "public" : "private");
-        setPublicUrl(publicShare?.url || "");
-        setPublicShareId(publicShare?.id || "");
+        const publicShare = result.shares?.find((share) => share.mode === "public" && !share.revokedAt);
+        setVisibility(file.accessMode || (publicShare ? "public" : "private"));
+        setRecipients((result.shares || []).filter((share) => share.mode === "recipient" && !share.revokedAt).map((share) => ({ ...share, username: share.recipient?.username, avatarUrl: share.recipient?.avatarUrl })));
       })
       .catch((error) =>
-        toast.error("Couldn’t prepare sharing", { description: error.message }),
+        {
+          initializedShareFileId.current = null;
+          toast.error("Couldn’t prepare sharing", { description: error.message });
+        },
       )
-      .finally(() => active && setIsLoading(false));
-    return () => {
-      active = false;
-    };
+      .finally(() => setIsLoading(false));
+    return undefined;
   }, [file]);
   async function changeVisibility(value) {
     if (!file) return;
     setVisibility(value);
     try {
-      if (value === "public" && !publicUrl) {
-        const result = await driveApi.createShare(file.id, "public");
-        setPublicUrl(result.share.url || "");
-        setPublicShareId(result.share.id);
-      }
-      if (value === "private" && publicShareId) {
-        await driveApi.revokeShare(publicShareId);
-        setPublicShareId("");
-        setPublicUrl("");
+      await driveApi.setAccess(file.id, value);
+      if (value === "private") {
+        setLinkExpiry((current) => current === "never" ? "7d" : current);
       }
     } catch (error) {
       setVisibility(value === "public" ? "private" : "public");
       toast.error("Couldn’t change visibility", { description: error.message });
     }
   }
-  async function generatePrivateLink() {
+  async function createLink() {
     setIsGenerating(true);
     try {
-      const expiryMinutes = { "1h": 60, "1d": 24 * 60, "7d": 7 * 24 * 60, "30d": 30 * 24 * 60 }[privateExpiry];
-      const result = await driveApi.createShare(file.id, "link", new Date(Date.now() + expiryMinutes * 60_000).toISOString());
-      setPrivateUrl(result.share.url || "");
-      setPrivateExpiresAt(result.share.expiresAt || "");
+      const isPublic = linkExpiry === "never";
+      const expiryMinutes = { "1h": 60, "1d": 24 * 60, "7d": 7 * 24 * 60, "30d": 30 * 24 * 60 }[linkExpiry];
+      const result = await driveApi.createShare(file.id, isPublic ? "public" : "link", isPublic ? undefined : { expiresAt: new Date(Date.now() + expiryMinutes * 60_000).toISOString() });
+      setCreatedLink(result.share);
     } catch (error) {
       toast.error("Couldn’t create private link", {
         description: error.message,
@@ -484,6 +481,41 @@ function ShareContent({ file, onClose }) {
     } finally {
       setIsGenerating(false);
     }
+  }
+  useEffect(() => {
+    if (visibility !== "private" || recipientQuery.trim().length < 2) return undefined;
+    const timer = window.setTimeout(() => driveApi.findUsers(recipientQuery.trim()).then((result) => setRecipientResults(result.users || [])).catch(() => setRecipientResults([])), 180);
+    return () => window.clearTimeout(timer);
+  }, [recipientQuery, visibility]);
+  function addRecipient(user) {
+    if (pendingRecipient?.status === "pending" || recipients.some((share) => share.recipientId === user.id)) return;
+    const pending = { user, role: newRecipientRole, status: "pending", share: null };
+    setPendingRecipient(pending);
+    driveApi.createShare(file.id, "recipient", { recipientId: user.id, role: newRecipientRole })
+      .then((result) => {
+        const share = { ...result.share, username: user.username, avatarUrl: user.avatarUrl };
+        setRecipients((current) => [...current, share]);
+        setPendingRecipient((current) => current?.user.id === user.id ? { ...current, status: "success", share } : current);
+      })
+      .catch((error) => {
+        setPendingRecipient((current) => current?.user.id === user.id ? null : current);
+        toast.error("Couldn’t add recipient", { description: error.message });
+      });
+  }
+  function revokeRecipient(share) {
+    if (share.pending) return;
+    const previous = recipients;
+    setRecipients((current) => current.filter((item) => item.id !== share.id));
+    setPendingRecipient((current) => current?.share?.id === share.id ? null : current);
+    driveApi.revokeShare(share.id).catch((error) => {
+      setRecipients(previous);
+      setPendingRecipient((current) => current ?? { user: { id: share.recipientId, username: share.username, avatarUrl: share.avatarUrl }, role: share.role, status: "success", share });
+      toast.error("Couldn’t remove access", { description: error.message });
+    });
+  }
+  async function changeRecipientRole(share, role) {
+    if (share.pending) return;
+    try { await driveApi.updateShareRole(share.id, role); setRecipients((current) => current.map((item) => item.id === share.id ? { ...item, role } : item)); } catch (error) { toast.error("Couldn’t update role", { description: error.message }); }
   }
   async function copy(value) {
     try {
@@ -494,39 +526,11 @@ function ShareContent({ file, onClose }) {
     }
   }
   const accessLabel =
-    visibility === "public" ? "Anyone with the link" : "Private link";
-  const linkField = (url, placeholder) => (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.16, ease: "easeOut" }}
-    >
-      <Field>
-        <FieldLabel htmlFor="share-link">Share link</FieldLabel>
-        <InputGroup>
-          <InputGroupInput
-            id="share-link"
-            value={url}
-            readOnly
-            placeholder={placeholder}
-          />
-          <InputGroupAddon align="inline-end">
-            <InputGroupButton
-              size="icon-xs"
-              onClick={() => copy(url)}
-              aria-label="Copy share link"
-            >
-              <CopyIcon />
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
-      </Field>
-    </motion.div>
-  );
+    visibility === "public" ? "Public" : "Private";
   return (
-    <DialogContent className="max-w-lg">
+    <DialogContent keepMounted className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle>Share {file.name}</DialogTitle>
+        <DialogTitle className="pr-8 leading-5 break-all">Share {file.name}</DialogTitle>
         <DialogDescription>
           Control who can open this file, then copy a link to share it.
         </DialogDescription>
@@ -554,99 +558,44 @@ function ShareContent({ file, onClose }) {
                 <SelectGroup>
                   <SelectItem value="private">
                     <LockIcon />
-                    Private link
+                    Private
                   </SelectItem>
                   <SelectItem value="public">
                     <Globe2Icon />
-                    Anyone with the link
+                    Public
                   </SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
             <FieldDescription>
               {visibility === "public"
-                ? "Anyone who has this link can access the file."
-                : "Accessible as long as it hasn't expired."}
+                ? "Anyone can open a public link you create."
+                : "Only private links and people you add can access this item."}
             </FieldDescription>
           </Field>
-          <AnimatePresence initial={false} mode="wait">
-            {visibility === "public" ? (
-              <motion.div
-                key={publicUrl ? "public-link" : "public-pending"}
-                initial={{ opacity: 0, height: 0, y: reduceMotion ? 0 : 4 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0, y: reduceMotion ? 0 : -4 }}
-                transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
-                className="overflow-hidden"
-              >
-                {publicUrl ? (
-                  linkField(publicUrl, "Creating link…")
-                ) : (
-                  <div className="flex min-h-10 items-center gap-2 text-sm text-muted-foreground">
-                    <Spinner />
-                    Creating public link…
-                  </div>
-                )}
-              </motion.div>
-            ) : privateUrl ? (
-              <motion.div
-                key="private-link"
-                initial={{ opacity: 0, height: 0, y: 4 }}
-                animate={{ opacity: 1, height: "auto", y: 0 }}
-                exit={{ opacity: 0, height: 0, y: -4 }}
-                transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
-                className="overflow-hidden"
-              >
-                {linkField(privateUrl, "")}
-                <p className="mt-2 text-xs text-muted-foreground">Expires {new Date(privateExpiresAt).toLocaleString()}</p>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="private-action"
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
-                className="rounded-xl border bg-muted/30 p-3"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    Create a private link that expires.
-                  </p>
-                  <div className="flex w-full items-center">
-                    <div className="flex-1">
-                      <Select value={privateExpiry} onValueChange={setPrivateExpiry}>
-                        <SelectTrigger className="h-9 w-full rounded-r-none border-r-0" aria-label="Private link expiration">
-                          <span>{({ "1h": "1 hour", "1d": "1 day", "7d": "7 days", "30d": "30 days" })[privateExpiry]}</span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectItem value="1h">1 hour</SelectItem>
-                            <SelectItem value="1d">1 day</SelectItem>
-                            <SelectItem value="7d">7 days</SelectItem>
-                            <SelectItem value="30d">30 days</SelectItem>
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button
-                      type="button"
-                      className="flex-1 rounded-l-none"
-                      onClick={generatePrivateLink}
-                      disabled={isGenerating}
-                    >
-                      {isGenerating ? (
-                        <Spinner data-icon="inline-start" />
-                      ) : (
-                        <LinkIcon data-icon="inline-start" />
-                      )}
-                      Create private link
-                    </Button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          <Field className="rounded-xl border bg-muted/30 p-3">
+            <FieldLabel>Link</FieldLabel>
+            <FieldDescription>{visibility === "public" ? "Choose a public link that never expires or a private expiring link." : "Private links always expire."}</FieldDescription>
+            <div className="mt-3 flex w-full items-center">
+              <Select value={linkExpiry} onValueChange={setLinkExpiry}><SelectTrigger className="h-9 flex-1 rounded-r-none border-r-0" aria-label="Link expiration"><span>{{ never: "Never expires", "1h": "1 hour", "1d": "1 day", "7d": "7 days", "30d": "30 days" }[linkExpiry]}</span></SelectTrigger><SelectContent><SelectGroup>{visibility === "public" && <SelectItem value="never">Never expires</SelectItem>}<SelectItem value="1h">1 hour</SelectItem><SelectItem value="1d">1 day</SelectItem><SelectItem value="7d">7 days</SelectItem><SelectItem value="30d">30 days</SelectItem></SelectGroup></SelectContent></Select>
+              <Button type="button" className="flex-1 rounded-l-none" onClick={createLink} disabled={isGenerating}>{isGenerating ? <Spinner data-icon="inline-start" /> : <LinkIcon data-icon="inline-start" />}Create link</Button>
+            </div>
+            {createdLink?.url && <InputGroup className="mt-3"><InputGroupInput value={createdLink.url} readOnly /><InputGroupAddon align="inline-end"><InputGroupButton size="icon-xs" onClick={() => copy(createdLink.url)} aria-label="Copy share link"><CopyIcon /></InputGroupButton></InputGroupAddon></InputGroup>}
+          </Field>
+          {visibility === "private" && (
+            <Field>
+              <FieldLabel>People</FieldLabel>
+              <FieldDescription>Add registered users. {file.type === "folder" ? "Editors can manage folder contents." : "Files are view-only."}</FieldDescription>
+              <div className="mt-2 flex gap-2"><Input value={recipientQuery} onChange={(event) => { const value = event.target.value; setRecipientQuery(value); if (!value.trim()) setRecipientResults([]); }} placeholder="Search by username" /><Select value={newRecipientRole} onValueChange={setNewRecipientRole}><SelectTrigger className="w-24"><span>{newRecipientRole === "editor" ? "Editor" : "Viewer"}</span></SelectTrigger><SelectContent><SelectGroup><SelectItem value="viewer">Viewer</SelectItem>{file.type === "folder" && <SelectItem value="editor">Editor</SelectItem>}</SelectGroup></SelectContent></Select></div>
+              {recipientResults.length > 0 && <div className="mt-2 overflow-hidden rounded-lg border"><AnimatePresence mode="wait">{recipientResults.map((user) => {
+                const selected = pendingRecipient?.user.id === user.id ? pendingRecipient : null;
+                const existing = recipients.find((share) => share.recipientId === user.id);
+                const access = selected?.share || existing;
+                return <motion.div key={user.id} layout="position" initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reduceMotion ? 0 : -4, scale: reduceMotion ? 1 : 0.98 }} transition={{ duration: reduceMotion ? 0 : 0.16 }} className="border-b last:border-b-0"><AnimatePresence initial={false} mode="wait">{access || selected ? <motion.div key="access" initial={{ opacity: 0, y: reduceMotion ? 0 : 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reduceMotion ? 0 : -4 }} transition={{ duration: reduceMotion ? 0 : 0.14 }} className="flex items-center gap-2 px-3 py-2"><IdentityAvatar user={user} size="sm" /><span className="min-w-0 flex-1 truncate text-sm">@{user.username}</span><Select value={access?.role || selected.role} onValueChange={(role) => access ? changeRecipientRole(access, role) : undefined}><SelectTrigger className={cn("h-8 w-24", !access && "pointer-events-none")}><span>{(access?.role || selected.role) === "editor" ? "Editor" : "Viewer"}</span></SelectTrigger><SelectContent><SelectGroup><SelectItem value="viewer">Viewer</SelectItem>{file.type === "folder" && <SelectItem value="editor">Editor</SelectItem>}</SelectGroup></SelectContent></Select><Button type="button" variant="ghost" size="sm" className={cn("text-destructive", !access && "pointer-events-none")} onClick={() => access && revokeRecipient(access)}>Remove</Button></motion.div> : <motion.button key="result" type="button" initial={{ opacity: 0, y: reduceMotion ? 0 : 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reduceMotion ? 0 : -4 }} transition={{ duration: reduceMotion ? 0 : 0.14 }} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => addRecipient(user)}><span className="flex min-w-0 items-center gap-2 truncate"><IdentityAvatar user={user} size="sm" />@{user.username}</span><span className="text-xs text-primary">Add as {newRecipientRole}</span></motion.button>}</AnimatePresence></motion.div>;
+              })}</AnimatePresence></div>}
+              {recipients.filter((share) => !recipientResults.some((user) => user.id === share.recipientId)).length > 0 && <div className="mt-2 overflow-hidden rounded-lg border"><AnimatePresence initial={false}>{recipients.filter((share) => !recipientResults.some((user) => user.id === share.recipientId)).map((share) => <motion.div key={share.id} layout="position" initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.98 }} transition={{ duration: reduceMotion ? 0 : 0.16 }} className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0"><IdentityAvatar user={share} size="sm" /><span className="min-w-0 flex-1 truncate text-sm">{share.username ? `@${share.username}` : "Shared user"}</span><Select value={share.role || "viewer"} onValueChange={(role) => changeRecipientRole(share, role)}><SelectTrigger className="h-8 w-24"><span>{share.role === "editor" ? "Editor" : "Viewer"}</span></SelectTrigger><SelectContent><SelectGroup><SelectItem value="viewer">Viewer</SelectItem>{file.type === "folder" && <SelectItem value="editor">Editor</SelectItem>}</SelectGroup></SelectContent></Select><Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={() => revokeRecipient(share)}>Remove</Button></motion.div>)}</AnimatePresence></div>}
+            </Field>
+          )}
         </FieldGroup>
       )}
       <DialogFooter>
@@ -1315,9 +1264,41 @@ function DocumentPreview({ file, url, onReady, onError }) {
   );
 }
 
-function PreviewMedia({ file, onNavigationToneChange }) {
+const codeLanguages = {
+  js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript", ts: "typescript", tsx: "tsx", lua: "lua", py: "python", rb: "ruby", php: "php", java: "java", c: "c", cc: "cpp", cpp: "cpp", cs: "csharp", go: "go", rs: "rust", swift: "swift", kt: "kotlin", kts: "kotlin", sh: "shellscript", bash: "shellscript", zsh: "shellscript", fish: "shellscript", html: "html", css: "css", scss: "scss", sass: "sass", less: "less", vue: "vue", svelte: "svelte", xml: "xml", yaml: "yaml", yml: "yaml", toml: "toml", sql: "sql", md: "markdown", mdx: "mdx", graphql: "graphql", gql: "graphql", dockerfile: "dockerfile",
+};
+
+function codeLanguage(file) {
+  const lower = file.name.toLowerCase();
+  if (lower === "dockerfile") return "dockerfile";
+  return codeLanguages[lower.split(".").pop()] || "text";
+}
+
+function CodePreview({ file, url, onReady, onError }) {
+  const [fontSize, setFontSize] = useState(14);
+  const [html, setHtml] = useState("");
+  const [truncated, setTruncated] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(url, { credentials: "include", signal: controller.signal, headers: { Range: "bytes=0-1048575" } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load code");
+        setTruncated(response.status === 206);
+        const [source, shiki] = await Promise.all([response.text(), import("shiki")]);
+        return shiki.codeToHtml(source, { lang: codeLanguage(file), theme: "github-dark" });
+      })
+      .then((value) => { setHtml(value); onReady(); })
+      .catch((error) => { if (error.name !== "AbortError") { setHasError(true); onError(error); } });
+    return () => controller.abort();
+  }, [file, onError, onReady, url]);
+  if (hasError) return previewUnavailable(file);
+  return <div className="flex size-full flex-col overflow-hidden bg-[#24292f]" onClick={(event) => event.stopPropagation()}><div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-black/15 px-3 py-2"><span className="truncate font-mono text-xs text-white/65">{codeLanguage(file)}</span><div className="flex items-center gap-1"><Button variant="ghost" size="icon-sm" className="text-white/75 hover:bg-white/10 hover:text-white" onClick={() => setFontSize((current) => Math.max(11, current - 1))} aria-label="Decrease code text size"><ZoomOutIcon /></Button><span className="w-9 text-center text-xs tabular-nums text-white/65">{fontSize}</span><Button variant="ghost" size="icon-sm" className="text-white/75 hover:bg-white/10 hover:text-white" onClick={() => setFontSize((current) => Math.min(22, current + 1))} aria-label="Increase code text size"><ZoomInIcon /></Button></div></div>{truncated && <div className="shrink-0 border-b border-white/10 bg-amber-400/10 px-4 py-1.5 text-xs text-amber-100">Previewing the first 1 MB. Download the file to view all content.</div>}<div className="min-h-0 flex-1 overflow-auto [&>pre]:m-0 [&>pre]:min-h-full [&>pre]:p-4 [&>pre]:font-mono [&>pre]:leading-6 sm:[&>pre]:p-6" style={{ fontSize: `${fontSize}px` }} dangerouslySetInnerHTML={{ __html: html }} /></div>;
+}
+
+function PreviewMedia({ file, contentUrl, onNavigationToneChange }) {
   const reduceMotion = useReducedMotion();
-  const url = driveApi.fileUrl(file.id);
+  const url = contentUrl || driveApi.fileUrl(file.id);
   const kind = previewKind(file.name);
   const previewable = kind !== "download";
   const [isLoading, setIsLoading] = useState(previewable);
@@ -1330,6 +1311,7 @@ function PreviewMedia({ file, onNavigationToneChange }) {
     if (kind === "image") viewer = <ImagePreview file={file} url={url} onReady={complete} onError={fail} onNavigationToneChange={onNavigationToneChange} />;
     else if (kind === "video") viewer = <VideoPreview url={url} onReady={complete} onError={fail} onNavigationToneChange={onNavigationToneChange} />;
     else if (kind === "audio") viewer = <AudioPreview url={url} onReady={complete} onError={fail} />;
+    else if (kind === "code") viewer = <CodePreview file={file} url={url} onReady={complete} onError={fail} />;
     else viewer = <DocumentPreview file={file} url={url} onReady={complete} onError={fail} />;
   }
   return (
@@ -1349,7 +1331,7 @@ function PreviewMedia({ file, onNavigationToneChange }) {
   );
 }
 
-export function PreviewDialog({ file, files = [], onClose, onSelect }) {
+export function PreviewDialog({ file, files = [], onClose, onSelect, getContentUrl, getDownloadUrl }) {
   const [closingFile, setClosingFile] = useState(null);
   const previewPointerTarget = useRef(null);
   const activeFile = file || closingFile;
@@ -1392,9 +1374,9 @@ export function PreviewDialog({ file, files = [], onClose, onSelect }) {
           <Button variant="ghost" size="icon" onClick={requestClose} aria-label="Close preview" title="Close preview"><XIcon /></Button>
           <div className="min-w-0 flex-1">
             <DialogTitle className="truncate text-sm sm:text-base">{activeFile.name}</DialogTitle>
-            <DialogDescription className="mt-0.5 flex items-center gap-2"><Badge variant="secondary">{activeFile.size}</Badge></DialogDescription>
+            <DialogDescription className="mt-0.5 flex items-center gap-2"><Badge variant="outline">{activeFile.size}</Badge>{activeFile.isShared && <Badge variant="outline">Shared</Badge>}{activeFile.owner?.username && !activeFile.uploadedBy?.username && <span className="inline-flex items-center gap-1"><IdentityAvatar user={activeFile.owner} size="sm" />@{activeFile.owner.username}</span>}{activeFile.uploadedBy?.username && <span className="inline-flex items-center gap-1"><IdentityAvatar user={activeFile.uploadedBy} size="sm" />Uploaded by @{activeFile.uploadedBy.username}</span>}</DialogDescription>
           </div>
-          <Button nativeButton={false} variant="outline" size="sm" render={<a href={driveApi.downloadUrl(activeFile.id)} />}><DownloadIcon /> <span className="hidden sm:inline">Download</span></Button>
+          <Button nativeButton={false} variant="outline" size="sm" render={<a href={getDownloadUrl?.(activeFile) || driveApi.downloadUrl(activeFile.id)} />}><DownloadIcon /> <span className="hidden sm:inline">Download</span></Button>
         </DialogHeader>
         <div
           className="flex min-h-0 overflow-hidden"
@@ -1404,7 +1386,7 @@ export function PreviewDialog({ file, files = [], onClose, onSelect }) {
           }}
         >
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            <PreviewMedia key={activeFile.id} file={activeFile} onNavigationToneChange={updateNavigationTones} />
+            <PreviewMedia key={activeFile.id} file={activeFile} contentUrl={getContentUrl?.(activeFile)} onNavigationToneChange={updateNavigationTones} />
             <div className={cn("absolute top-1/2 left-2 -translate-y-1/2 sm:left-4", isDocumentPreview && "md:left-44")}>
               <Button className={previewNavigationClass(navigationTones.left)} variant="outline" size="icon-lg" onClick={(event) => { event.stopPropagation(); onSelect?.(previousFile); }} disabled={!previousFile} aria-label="Previous preview" title="Previous preview"><ChevronLeftIcon /></Button>
             </div>

@@ -1,15 +1,16 @@
 import { z } from "zod";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { AppContext } from "../app.js";
-import { idSchema, nullableIdSchema, pageSizeSchema, parse, sortSchema } from "../contracts.js";
+import { accessModeSchema, idSchema, nullableIdSchema, pageSizeSchema, parse, sortSchema } from "../contracts.js";
 import { ApiError } from "../lib/errors.js";
 import { formatBytes } from "../lib/format.js";
-import { nodeResponse, sendNodeContent } from "../http.js";
+import { nodeResponse, sendNodeContent, userIdentityResponse } from "../http.js";
 import { requireUser } from "../plugins/auth.js";
 
 const listSchema = z.object({ parentId: nullableIdSchema.optional().default(null), cursor: z.string().max(2048).optional(), pageSize: pageSizeSchema, sort: sortSchema, search: z.string().trim().max(120).optional() });
 const createFolderSchema = z.object({ parentId: nullableIdSchema.optional().default(null), name: z.string().max(255) });
 const patchSchema = z.object({ name: z.string().max(255).optional(), parentId: nullableIdSchema.optional() }).refine((value) => value.name !== undefined || value.parentId !== undefined, "Provide a name or destination folder.");
+const accessSchema = z.object({ accessMode: accessModeSchema });
 
 export async function registerNodeRoutes(app: FastifyInstance, context: AppContext) {
   app.get("/v1/nodes", async (request) => {
@@ -21,7 +22,15 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
     ]);
     if (!storage) throw new ApiError(404, "STORAGE_NOT_FOUND", "Storage profile is unavailable.");
     const percentUsed = Math.min(100, Math.round((storage.storageUsedBytes / storage.storageLimitBytes) * 100));
-    return { items: result.items.map(nodeResponse), nextCursor: result.nextCursor, breadcrumbs: result.breadcrumbs.map(nodeResponse), storage: { usedBytes: storage.storageUsedBytes, reservedBytes: storage.storageReservedBytes, limitBytes: storage.storageLimitBytes, usedDisplay: formatBytes(storage.storageUsedBytes), limitDisplay: formatBytes(storage.storageLimitBytes), percentUsed, isUnlimited: false, limitLabel: formatBytes(storage.storageLimitBytes) } };
+    const items = await Promise.all(result.items.map(async (node) => {
+      const shares = await context.drive.listShares(user.uid, node.id);
+      const isShared = node.accessMode === "private" && shares.some((share) => share.mode === "recipient" && !share.revokedAt && (!share.expiresAt || share.expiresAt > new Date()));
+      const uploadedBy = node.createdBy && node.createdBy !== node.ownerId
+        ? userIdentityResponse((await context.repository.getUser(node.createdBy)) ?? { id: node.createdBy, username: null, avatarVersion: null })
+        : null;
+      return { ...nodeResponse(node), isShared, uploadedBy };
+    }));
+    return { items, nextCursor: result.nextCursor, breadcrumbs: result.breadcrumbs.map(nodeResponse), storage: { usedBytes: storage.storageUsedBytes, reservedBytes: storage.storageReservedBytes, limitBytes: storage.storageLimitBytes, usedDisplay: formatBytes(storage.storageUsedBytes), limitDisplay: formatBytes(storage.storageLimitBytes), percentUsed, isUnlimited: false, limitLabel: formatBytes(storage.storageLimitBytes) } };
   });
 
   app.post("/v1/folders", async (request, reply) => {
@@ -37,6 +46,13 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
     const node = await context.drive.getNodeForOwner(user.uid, nodeId);
     if (!node) throw new ApiError(404, "NOT_FOUND", "The item does not exist.");
     return { item: nodeResponse(node) };
+  });
+
+  app.patch("/v1/nodes/:nodeId/access", async (request) => {
+    const user = await requireUser(request, context.firebase.auth);
+    const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
+    const body = parse(accessSchema, request.body);
+    return { item: nodeResponse(await context.drive.setNodeAccess(user.uid, nodeId, body.accessMode)) };
   });
 
   app.patch("/v1/nodes/:nodeId", async (request) => {
@@ -61,19 +77,22 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
     return { item: nodeResponse(await context.drive.restoreNode(user.uid, nodeId)) };
   });
 
-  app.get("/v1/nodes/:nodeId/content", async (request, reply) => {
+  async function getReadableNode(request: FastifyRequest) {
     const user = await requireUser(request, context.firebase.auth);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
-    const node = await context.drive.getNodeForOwner(user.uid, nodeId);
-    if (!node) throw new ApiError(404, "NOT_FOUND", "The file does not exist.");
+    const node = await context.drive.getNode(nodeId);
+    const access = node ? await context.drive.getRecipientAccess(user.uid, nodeId) : null;
+    if (!node || !access) throw new ApiError(404, "NOT_FOUND", "The item does not exist.");
+    return { node, access };
+  }
+
+  app.get("/v1/nodes/:nodeId/content", async (request, reply) => {
+    const { node } = await getReadableNode(request);
     return sendNodeContent(request, reply, context.drive, node, false);
   });
 
   app.get("/v1/nodes/:nodeId/thumbnail", { config: { rateLimit: { max: 240, timeWindow: "1 minute" } } }, async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
-    const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
-    const node = await context.drive.getNodeForOwner(user.uid, nodeId);
-    if (!node) throw new ApiError(404, "NOT_FOUND", "The item does not exist.");
+    const { node } = await getReadableNode(request);
     const preview = await context.drive.streamPreview(node);
     if (!preview) return reply.code(204).send();
     return reply
@@ -84,10 +103,7 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.get("/v1/nodes/:nodeId/download", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
-    const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
-    const node = await context.drive.getNodeForOwner(user.uid, nodeId);
-    if (!node) throw new ApiError(404, "NOT_FOUND", "The file does not exist.");
+    const { node } = await getReadableNode(request);
     return sendNodeContent(request, reply, context.drive, node, true);
   });
 
@@ -122,7 +138,25 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   app.get("/v1/shared", async (request) => {
     const user = await requireUser(request, context.firebase.auth);
     const page = await context.drive.listShared(user.uid);
-    return { items: page.items.map(nodeResponse), nextCursor: page.nextCursor };
+    return { items: await Promise.all(page.items.map(async (item) => ({ ...nodeResponse(item.node), sharedRole: item.role, sharedSource: item.source, shareId: item.shareId, owner: userIdentityResponse((await context.repository.getUser(item.node.ownerId)) ?? { id: item.node.ownerId, username: null, avatarVersion: null }), uploadedBy: item.node.createdBy && item.node.createdBy !== item.node.ownerId ? userIdentityResponse((await context.repository.getUser(item.node.createdBy)) ?? { id: item.node.createdBy, username: null, avatarVersion: null }) : null }))), nextCursor: page.nextCursor };
+  });
+
+  app.get("/v1/shared/:nodeId/children", async (request) => {
+    const user = await requireUser(request, context.firebase.auth);
+    const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
+    const query = parse(listSchema, request.query);
+    const node = await context.drive.getNode(nodeId);
+    const access = node ? await context.drive.getRecipientAccess(user.uid, nodeId) : null;
+    if (!node || node.kind !== "folder" || !access) throw new ApiError(404, "FOLDER_NOT_FOUND", "The shared folder is unavailable.");
+    const page = await context.drive.list(node.ownerId, { parentId: nodeId, cursor: query.cursor, pageSize: query.pageSize ?? 25, sort: query.sort ?? "date:new-first", search: query.search });
+    const owner = userIdentityResponse((await context.repository.getUser(node.ownerId)) ?? { id: node.ownerId, username: null, avatarVersion: null });
+    return { items: await Promise.all(page.items.map(async (item) => ({ ...nodeResponse(item), sharedRole: access.role, owner, uploadedBy: item.createdBy && item.createdBy !== item.ownerId ? userIdentityResponse((await context.repository.getUser(item.createdBy)) ?? { id: item.createdBy, username: null, avatarVersion: null }) : null }))), nextCursor: page.nextCursor, breadcrumbs: page.breadcrumbs.map(nodeResponse), role: access.role };
+  });
+
+  app.get("/v1/users", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => {
+    await requireUser(request, context.firebase.auth);
+    const { query } = parse(z.object({ query: z.string().trim().min(2).max(120) }), request.query);
+    return { users: (await context.drive.findUsers(query.toLowerCase())).map(userIdentityResponse) };
   });
 
   app.get("/v1/trash", async (request) => {

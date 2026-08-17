@@ -12,16 +12,18 @@ import {
   HardDriveIcon,
   LayoutListIcon,
   LogOutIcon,
+  UserRoundIcon,
   MenuIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   SearchIcon,
+  Share2Icon,
   CheckIcon,
   Trash2Icon,
   UploadIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { IdentityAvatar } from "@/components/identity-avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -86,6 +88,7 @@ import {
   ShareDialog,
 } from "@/components/drive/file-dialogs";
 import { UploadDialog } from "@/components/drive/upload-dialog";
+import { UsernameCompletionDialog } from "@/components/profile/username-completion-dialog";
 import { driveApi } from "@/lib/drive-api";
 import { errorMessage } from "@/lib/drive-utils";
 import { cn } from "@/lib/utils";
@@ -142,7 +145,7 @@ function StorageUsage({ storage, isError = false }) {
           <HardDriveIcon className="size-3.5 text-primary" />
           Storage
         </span>
-        <Badge variant="secondary" className="shrink-0 text-[11px]">
+        <Badge variant="outline" className="shrink-0 text-[11px]">
           {storage?.isUnlimited
             ? "Unlimited"
             : isError
@@ -183,8 +186,8 @@ function AccountDetailsSkeleton() {
   );
 }
 
-function AccountMenu({ email, isLoading, onSignOut, side = "right" }) {
-  const displayName = email?.split("@")[0] || "";
+function AccountMenu({ username, email, avatarUrl, isLoading, onSignOut, onProfile, side = "right" }) {
+  const displayName = username ? `@${username}` : "";
   if (isLoading) return <AccountDetailsSkeleton />;
   return (
     <DropdownMenu>
@@ -196,21 +199,21 @@ function AccountMenu({ email, isLoading, onSignOut, side = "right" }) {
           />
         }
       >
-        <Avatar>
-          <AvatarFallback>{initials(email)}</AvatarFallback>
-        </Avatar>
+        <IdentityAvatar user={{ username, avatarUrl }} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">
             {displayName}
           </span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {email}
-          </span>
+          <span className="block truncate text-xs text-muted-foreground">{email || ""}</span>
         </span>
         <EllipsisVerticalIcon className="size-4 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent side={side} align="center" className="w-48">
         <DropdownMenuGroup>
+          <DropdownMenuItem onClick={onProfile}>
+            <UserRoundIcon />
+            Profile
+          </DropdownMenuItem>
           <DropdownMenuItem variant="destructive" onClick={onSignOut}>
             <LogOutIcon />
             Sign out
@@ -221,23 +224,29 @@ function AccountMenu({ email, isLoading, onSignOut, side = "right" }) {
   );
 }
 
-function Navigation({
+export function Navigation({
   onUpload,
   onFolder,
   onSignOut,
+  onProfile,
   storage,
   storageIsError,
-  userEmail,
+  username,
+  email,
+  avatarUrl,
   userIsLoading,
   activeSection,
   onSectionChange,
+  canManageContent = true,
+  showContentActions = true,
   compact = false,
 }) {
   const isTrash = activeSection === "trash";
+  const isShared = activeSection === "shared";
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <Brand className="px-2 py-1" href="/drive" />
-      <div className="flex flex-col gap-2 px-1">
+      {showContentActions && (!isShared || canManageContent) && <div className="flex flex-col gap-2 px-1">
         <Button size={compact ? "default" : "lg"} onClick={onUpload}>
           <UploadIcon data-icon="inline-start" />
           Upload files
@@ -250,12 +259,12 @@ function Navigation({
           <FolderPlusIcon data-icon="inline-start" />
           New folder
         </Button>
-      </div>
+      </div>}
       <Separator />
       <nav aria-label="Drive navigation" className="flex flex-col gap-1">
         <Button
           variant="ghost"
-          className={cn("justify-start gap-2 px-2.5", !isTrash && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary")}
+          className={cn("justify-start gap-2 px-2.5", activeSection === "drive" && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary")}
           onClick={() => onSectionChange("drive")}
         >
           <FilesIcon className="size-4" />
@@ -269,14 +278,25 @@ function Navigation({
           <Trash2Icon className="size-4" />
           Trash
         </Button>
+        <Button
+          variant="ghost"
+          className={cn("justify-start gap-2 px-2.5", isShared && "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary")}
+          onClick={() => onSectionChange("shared")}
+        >
+          <Share2Icon className="size-4" />
+          Shared
+        </Button>
       </nav>
       <div className="mt-auto flex flex-col gap-3">
         <StorageUsage storage={storage} isError={storageIsError} />
         <Separator />
         <AccountMenu
-          email={userEmail}
+          username={username}
+          email={email}
+          avatarUrl={avatarUrl}
           isLoading={userIsLoading}
           onSignOut={onSignOut}
+          onProfile={onProfile}
           side={compact ? "top" : "right"}
         />
       </div>
@@ -345,7 +365,7 @@ function UploadStatusBadge({ status }) {
           exit={{ opacity: 0, y: -4, scale: 0.96 }}
           transition={{ duration: 0.16, ease: "easeOut" }}
         >
-          <Badge variant="secondary" className="h-7 gap-1.5 px-2.5">
+          <Badge variant="outline" className="h-7 gap-1.5 px-2.5">
             {status.state === "uploading" ? (
               <>
                 Uploading {status.count} {status.count === 1 ? "file" : "files"}…
@@ -369,7 +389,9 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const router = useRouter();
   const reduceMotion = useReducedMotion();
   const uploadNoticeTimer = useRef(null);
+  const shareCloseTimer = useRef(null);
   const [folderId, setFolderId] = useState(null);
+  const [sharedRole, setSharedRole] = useState(null);
   const [activeSection, setActiveSection] = useState(initialSection);
   const [breadcrumbs, setBreadcrumbs] = useState([]);
   const [search, setSearch] = useState("");
@@ -385,6 +407,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const [breadcrumbDropId, setBreadcrumbDropId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [shareFile, setShareFile] = useState(null);
+  const [isShareClosing, setIsShareClosing] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -392,6 +415,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const openUploaderForResume = useCallback(() => setIsUploadOpen(true), []);
 
   useEffect(() => () => window.clearTimeout(uploadNoticeTimer.current), []);
+  useEffect(() => () => window.clearTimeout(shareCloseTimer.current), []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -409,7 +433,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   }, []);
   useEffect(() => {
     function syncSectionFromLocation() {
-      const nextSection = window.location.pathname === "/trash" ? "trash" : "drive";
+      const nextSection = window.location.pathname === "/trash" ? "trash" : window.location.pathname === "/shared" ? "shared" : "drive";
       setActiveSection(nextSection);
       setFolderId(null);
       setBreadcrumbs([]);
@@ -444,7 +468,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const storageQuery = useQuery({
     queryKey: ["storage-usage"],
     queryFn: () => driveApi.getStorageUsage(),
-    enabled: sessionQuery.isSuccess,
+    enabled: sessionQuery.isSuccess && !sessionQuery.data?.user?.needsUsername,
   });
   useEffect(() => {
     if (sessionQuery.isError && sessionQuery.error?.code === "UNAUTHENTICATED")
@@ -472,11 +496,12 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     setActiveSection(section);
     setFolderId(null);
     setBreadcrumbs([]);
+    setSharedRole(null);
     setSearch("");
     setDebouncedSearch("");
     resetPagination();
     setIsMobileNavOpen(false);
-    window.history.pushState(null, "", section === "trash" ? "/trash" : "/drive");
+    router.push(section === "trash" ? "/trash" : section === "shared" ? "/shared" : "/drive");
   }
   function changeView(nextView) {
     setView(nextView);
@@ -484,12 +509,19 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   }
   const cursor = pagination.cursors[pagination.page] || null;
   const isTrash = activeSection === "trash";
+  const isShared = activeSection === "shared";
   const rawFilesQuery = useQuery({
     queryKey: isTrash
       ? ["drive-trash", cursor]
+      : isShared
+        ? ["drive-shared", folderId, cursor]
       : ["drive-list", folderId, debouncedSearch, sort, cursor],
     queryFn: () => isTrash
       ? driveApi.listTrash({ pageSize: PAGE_SIZE, cursor })
+      : isShared
+        ? folderId
+          ? driveApi.listSharedChildren(folderId, { pageSize: PAGE_SIZE, cursor, search: debouncedSearch, sort })
+          : driveApi.listShared()
       : driveApi.list({
           parentId: folderId,
           pageSize: PAGE_SIZE,
@@ -497,7 +529,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
           sort,
           cursor,
         }),
-    enabled: sessionQuery.isSuccess,
+    enabled: sessionQuery.isSuccess && !sessionQuery.data?.user?.needsUsername,
   });
   const filesQuery = {
     ...rawFilesQuery,
@@ -508,8 +540,28 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["drive-list"] });
     queryClient.invalidateQueries({ queryKey: ["drive-trash"] });
+    queryClient.invalidateQueries({ queryKey: ["drive-shared"] });
     queryClient.invalidateQueries({ queryKey: ["storage-usage"] });
   };
+  const openShare = useCallback((file) => {
+    window.clearTimeout(shareCloseTimer.current);
+    setIsShareClosing(false);
+    setShareFile(file);
+  }, []);
+  const closeShare = useCallback(() => {
+    if (!shareFile || isShareClosing) return;
+    setIsShareClosing(true);
+    window.clearTimeout(shareCloseTimer.current);
+    const completeClose = () => {
+      setShareFile(null);
+      setIsShareClosing(false);
+    };
+    if (reduceMotion) {
+      completeClose();
+      return;
+    }
+    shareCloseTimer.current = window.setTimeout(completeClose, 140);
+  }, [isShareClosing, reduceMotion, shareFile]);
 
   const createFolder = useMutation({
     mutationFn: (name) => driveApi.createFolder(name, folderId),
@@ -572,6 +624,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     if (file.type === "folder") {
       setFolderId(file.id);
       setBreadcrumbs((current) => [...current, file]);
+      if (isShared) setSharedRole(file.sharedRole || sharedRole || "viewer");
       setSearch("");
       setDebouncedSearch("");
       resetPagination();
@@ -581,6 +634,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     if (isTrash) return;
     const nextCrumbs = index < 0 ? [] : breadcrumbs.slice(0, index + 1);
     setFolderId(index < 0 ? null : nextCrumbs.at(-1)?.id || null);
+    if (isShared && index < 0) setSharedRole(null);
     setBreadcrumbs(nextCrumbs);
     setSearch("");
     setDebouncedSearch("");
@@ -634,14 +688,21 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const navigationProps = {
     storage: storageQuery.data,
     storageIsError: storageQuery.isError,
-    userEmail: sessionQuery.data?.user?.email,
+    username: sessionQuery.data?.user?.username,
+    email: sessionQuery.data?.user?.email,
+    avatarUrl: sessionQuery.data?.user?.avatarUrl,
     userIsLoading: sessionQuery.isPending,
     onSignOut: signOut,
+    onProfile: () => router.push("/profile"),
     activeSection,
     onSectionChange: selectSection,
+    canManageContent: !isShared || (Boolean(folderId) && sharedRole === "editor"),
   };
+  const canManageCurrentFolder = !isShared || (Boolean(folderId) && sharedRole === "editor");
   const pathBreadcrumbs = isTrash
     ? [trashBreadcrumb]
+    : isShared
+      ? [{ id: "shared", name: "Shared" }, ...breadcrumbs]
     : [rootBreadcrumb, ...breadcrumbs];
   const files = isTrash && debouncedSearch
     ? (filesQuery.data?.files || []).filter((file) =>
@@ -650,6 +711,10 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     : filesQuery.data?.files || [];
   return (
     <div className="min-h-svh bg-background md:flex">
+      <UsernameCompletionDialog open={Boolean(sessionQuery.data?.user?.needsUsername)} onCompleted={() => {
+        queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+        queryClient.invalidateQueries({ queryKey: ["profile"] });
+      }} />
       <AnimatePresence initial={false}>
         {!isSidebarCollapsed && (
           <motion.aside
@@ -824,36 +889,36 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button
+                {canManageCurrentFolder ? <Button
                   className="sm:hidden"
                   onClick={() => setIsUploadOpen(true)}
                 >
                   <UploadIcon data-icon="inline-start" />
                   Upload
-                </Button>
-                <Button
+                </Button> : null}
+                {canManageCurrentFolder ? <Button
                   className="sm:hidden"
                   variant="outline"
                   onClick={() => setIsFolderOpen(true)}
                 >
                   <FolderPlusIcon data-icon="inline-start" />
                   New folder
-                </Button>
-                <Button
+                </Button> : null}
+                {canManageCurrentFolder ? <Button
                   className="hidden sm:inline-flex"
                   onClick={() => setIsUploadOpen(true)}
                 >
                   <UploadIcon data-icon="inline-start" />
                   Upload
-                </Button>
-                <Button
+                </Button> : null}
+                {canManageCurrentFolder ? <Button
                   className="hidden sm:inline-flex"
                   variant="outline"
                   onClick={() => setIsFolderOpen(true)}
                 >
                   <FolderPlusIcon data-icon="inline-start" />
                   New folder
-                </Button>
+                </Button> : null}
               </div>
             </div>
           </motion.div>
@@ -927,10 +992,11 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                 setBreadcrumbDropId(null);
               }}
               onRename={setRenameFile}
-              onShare={setShareFile}
-              onDelete={(file) => setDeleteTarget({ file, permanent: isTrash })}
+              onShare={openShare}
+              onDelete={(file) => setDeleteTarget({ file, permanent: isTrash || (isShared && sharedRole === "editor") })}
               onRestore={(file) => restore.mutateAsync(file)}
               isTrash={isTrash}
+              readOnly={isShared && sharedRole !== "editor"}
               emptyTitle={isTrash ? "Trash is empty" : undefined}
               emptyDescription={isTrash ? "Items you delete stay here for 30 days." : undefined}
               onRetry={() => filesQuery.refetch()}
@@ -975,7 +1041,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         onClose={() => setDeleteTarget(null)}
         onDelete={(file) => remove.mutateAsync({ file, permanent: Boolean(deleteTarget?.permanent) })}
       />
-      <ShareDialog file={shareFile} onClose={() => setShareFile(null)} />
+      <ShareDialog file={shareFile} closing={isShareClosing} onClose={closeShare} />
       <PreviewDialog
         file={previewFile}
         files={isTrash ? [] : filesQuery.data?.files || []}

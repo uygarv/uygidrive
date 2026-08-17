@@ -1,10 +1,15 @@
 export type NodeKind = "file" | "folder";
 export type NodeStatus = "active" | "uploading" | "trashed";
 export type ShareMode = "public" | "link" | "recipient";
+export type AccessMode = "public" | "private";
+export type ShareRole = "viewer" | "editor";
 
 export type UserRecord = {
   id: string;
   email: string;
+  username: string | null;
+  usernameLower: string | null;
+  avatarVersion: string | null;
   storageLimitBytes: number;
   storageUsedBytes: number;
   storageReservedBytes: number;
@@ -29,6 +34,9 @@ export type NodeRecord = {
   updatedAt: Date;
   trashedAt: Date | null;
   durationSeconds?: number;
+  accessMode: AccessMode;
+  createdBy?: string;
+  updatedBy?: string;
 };
 
 export type ShareRecord = {
@@ -39,15 +47,24 @@ export type ShareRecord = {
   publicId: string | null;
   tokenHash: string | null;
   recipientId: string | null;
+  role: ShareRole | null;
   expiresAt: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
 
+export type SharedItemRecord = {
+  node: NodeRecord;
+  role: ShareRole;
+  source: "recipient" | "public-link" | "private-link";
+  shareId: string;
+};
+
 export type UploadRecord = {
   id: string;
   ownerId: string;
+  actorId: string;
   nodeId: string;
   parentId: string | null;
   name: string;

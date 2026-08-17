@@ -100,7 +100,7 @@ async function request(path, options = {}) {
     credentials: "include",
     ...options,
     headers: {
-      ...(options.body && !(options.body instanceof FormData)
+      ...(options.body && !(options.body instanceof FormData) && !(options.body instanceof Blob)
         ? {
             "Content-Type": "application/json",
           }
@@ -161,6 +161,13 @@ function normalizeFile(file) {
     previewUrl: file.previewUrl || null,
     trashedAt: file.trashedAt || null,
     durationSeconds: file.durationSeconds || null,
+    accessMode: file.accessMode || "private",
+    sharedRole: file.sharedRole || null,
+    sharedSource: file.sharedSource || null,
+    shareId: file.shareId || null,
+    owner: file.owner || null,
+    uploadedBy: file.uploadedBy || null,
+    isShared: Boolean(file.isShared),
   };
 }
 
@@ -347,6 +354,16 @@ export const driveApi = {
     };
   },
 
+  async listShared() {
+    const result = await request("/v1/shared");
+    return { files: (result.items || []).map(normalizeFile), nextCursor: result.nextCursor || null };
+  },
+
+  async listSharedChildren(nodeId, { pageSize = 25, cursor = null, search = "", sort = "date:new-first" } = {}) {
+    const result = await request(`/v1/shared/${encodeURIComponent(nodeId)}/children?${new URLSearchParams({ pageSize: String(pageSize), sort, ...(cursor ? { cursor } : {}), ...(search ? { search } : {}) }).toString()}`);
+    return { files: (result.items || []).map(normalizeFile), breadcrumbs: (result.breadcrumbs || []).map(normalizeFile), role: result.role, nextCursor: result.nextCursor || null };
+  },
+
   getStorageUsage() {
     return isMockDrive()
       ? Promise.resolve(
@@ -444,7 +461,7 @@ export const driveApi = {
     );
   },
 
-  createShare(nodeId, mode, expiresAt = null) {
+  createShare(nodeId, mode, { expiresAt = null, recipientId = null, role = null } = {}) {
     return request(
       `/v1/nodes/${encodeURIComponent(nodeId)}/shares`,
       {
@@ -452,6 +469,8 @@ export const driveApi = {
         body: JSON.stringify({
           mode,
           expiresAt,
+          recipientId,
+          role,
         }),
       },
     );
@@ -464,6 +483,34 @@ export const driveApi = {
         method: "DELETE",
       },
     );
+  },
+
+  updateShareRole(shareId, role) {
+    return request(`/v1/shares/${encodeURIComponent(shareId)}`, { method: "PATCH", body: JSON.stringify({ role }) });
+  },
+
+  setAccess(nodeId, accessMode) {
+    return request(`/v1/nodes/${encodeURIComponent(nodeId)}/access`, { method: "PATCH", body: JSON.stringify({ accessMode }) }).then((result) => normalizeFile(result.item));
+  },
+
+  findUsers(query) {
+    return request(`/v1/users?${new URLSearchParams({ query }).toString()}`);
+  },
+
+  recordPublicOpen(publicId) {
+    return request(`/v1/public/${encodeURIComponent(publicId)}/open`, { method: "POST" });
+  },
+
+  recordPrivateOpen(token) {
+    return request(`/v1/s/${encodeURIComponent(token)}/open`, { method: "POST" });
+  },
+
+  publicChildren(publicId, parentId = null) {
+    return request(`/v1/public/${encodeURIComponent(publicId)}/children${parentId ? `?${new URLSearchParams({ parentId })}` : ""}`).then((result) => (result.items || []).map(normalizeFile));
+  },
+
+  privateChildren(token, parentId = null) {
+    return request(`/v1/s/${encodeURIComponent(token)}/children${parentId ? `?${new URLSearchParams({ parentId })}` : ""}`).then((result) => (result.items || []).map(normalizeFile));
   },
 
   async signIn(email, password) {
@@ -481,7 +528,7 @@ export const driveApi = {
     return result.user;
   },
 
-  async signUp(email, password) {
+  async signUp(email, password, username) {
     const result = await request(
       "/v1/auth/sign-up",
       {
@@ -489,11 +536,32 @@ export const driveApi = {
         body: JSON.stringify({
           email,
           password,
+          username,
         }),
       },
     );
 
     return result.user;
+  },
+
+  getProfile() {
+    return request("/v1/profile");
+  },
+
+  updateProfile(username) {
+    return request("/v1/profile", { method: "PATCH", body: JSON.stringify({ username }) });
+  },
+
+  uploadAvatar(blob) {
+    return request("/v1/profile/avatar", { method: "PUT", body: blob, headers: { "Content-Type": "application/octet-stream" } });
+  },
+
+  deleteAvatar() {
+    return request("/v1/profile/avatar", { method: "DELETE" });
+  },
+
+  avatarUrl(user) {
+    return user?.avatarUrl ? endpoint(user.avatarUrl) : null;
   },
 
   async logout() {
@@ -538,6 +606,14 @@ export const driveApi = {
     return endpoint(
       `/v1/s/${encodeURIComponent(token)}/content`,
     );
+  },
+
+  publicNodeContentUrl(publicId, nodeId, download = false) {
+    return endpoint(`/v1/public/${encodeURIComponent(publicId)}/nodes/${encodeURIComponent(nodeId)}/content${download ? "?download=true" : ""}`);
+  },
+
+  privateNodeContentUrl(token, nodeId, download = false) {
+    return endpoint(`/v1/s/${encodeURIComponent(token)}/nodes/${encodeURIComponent(nodeId)}/content${download ? "?download=true" : ""}`);
   },
 
   publicInfo(publicId) {

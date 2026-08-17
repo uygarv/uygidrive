@@ -22,6 +22,7 @@ import {
   Trash2Icon,
   RotateCcwIcon,
   PlayIcon,
+  UserRoundIcon,
 } from "lucide-react";
 import {
   Empty,
@@ -32,6 +33,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +50,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { driveApi } from "@/lib/drive-api";
+import { IdentityAvatar } from "@/components/identity-avatar";
 
 const thumbnailContentTypes = new Set([
   "image/jpeg",
@@ -118,7 +121,7 @@ function placeholderSurface(file, grid) {
   return grid ? "bg-muted text-muted-foreground dark:bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--muted),white_12%),color-mix(in_srgb,var(--muted),black_12%))]" : "bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--muted),white_12%),color-mix(in_srgb,var(--muted),black_12%))] text-muted-foreground";
 }
 
-function FileThumbnail({ file, className, iconClassName, grid = false }) {
+function FileThumbnail({ file, className, iconClassName, grid = false, contentUrl }) {
   const [didFail, setDidFail] = useState(false);
   const hasThumbnail = isThumbnailFile(file) && !didFail;
   const isVideo = isVideoFile(file);
@@ -135,7 +138,7 @@ function FileThumbnail({ file, className, iconClassName, grid = false }) {
 
       {hasThumbnail && (
         <img
-          src={file.previewUrl || driveApi.thumbnailUrl(file.id)}
+          src={file.previewUrl || contentUrl || driveApi.thumbnailUrl(file.id)}
           alt=""
           className="absolute inset-0 size-full object-cover"
           loading="lazy"
@@ -156,7 +159,7 @@ function FileThumbnail({ file, className, iconClassName, grid = false }) {
   );
 }
 
-function FileActions({ file, isTrash, onDownload, onMove, onRename, onShare, onDelete, onRestore, className }) {
+function FileActions({ file, isTrash, readOnly, onDownload, onMove, onRename, onShare, onDelete, onRestore, className }) {
   return (
     <div className={className}>
       <DropdownMenu>
@@ -166,7 +169,7 @@ function FileActions({ file, isTrash, onDownload, onMove, onRename, onShare, onD
               <DropdownMenuTrigger
                 render={
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="icon-sm"
                     aria-label={`Actions for ${file.name}`}
                   />
@@ -192,6 +195,7 @@ function FileActions({ file, isTrash, onDownload, onMove, onRename, onShare, onD
             </DropdownMenuGroup>
           ) : (
             <>
+          {readOnly ? <DropdownMenuGroup><DropdownMenuItem onClick={() => onDownload(file)} disabled={file.type === "folder"}><DownloadIcon />Download</DropdownMenuItem></DropdownMenuGroup> : <>
           {file.type === "file" && (
             <>
               <DropdownMenuGroup>
@@ -218,6 +222,10 @@ function FileActions({ file, isTrash, onDownload, onMove, onRename, onShare, onD
         {file.type === "folder" && (
           <>
             <DropdownMenuGroup>
+              <DropdownMenuItem onClick={() => onShare(file)}>
+                <Share2Icon />
+                Share
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onMove(file)}>
                 <FolderInputIcon />
                 Move
@@ -235,6 +243,7 @@ function FileActions({ file, isTrash, onDownload, onMove, onRename, onShare, onD
               Delete
             </DropdownMenuItem>
           </DropdownMenuGroup>
+          </>}
             </>
           )}
         </DropdownMenuContent>
@@ -308,6 +317,10 @@ export function FileBrowser({
   onDelete,
   onRestore,
   isTrash = false,
+  readOnly = false,
+  hideActions = false,
+  getContentUrl,
+  getDownloadUrl,
   emptyTitle,
   emptyDescription,
   onRetry,
@@ -405,6 +418,7 @@ export function FileBrowser({
           const hasMediaPreview = isThumbnailFile(file);
           const isDropTarget = dropTargetId === file.id;
           const duration = durationLabel(file.durationSeconds);
+          const collaborator = file.uploadedBy?.username ? file.uploadedBy : file.owner?.username ? file.owner : null;
 
           return (
           <motion.article
@@ -424,7 +438,7 @@ export function FileBrowser({
               isDropTarget && "ring-2 ring-primary ring-offset-2 ring-offset-background",
             )}
             key={file.id}
-            draggable={!isTrash}
+            draggable={!isTrash && !readOnly}
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", file.id);
@@ -469,6 +483,7 @@ export function FileBrowser({
               <FileThumbnail
                 file={file}
                 grid={view === "grid"}
+                contentUrl={getContentUrl?.(file)}
                 className={cn(
                   view === "grid"
                     ? file.type === "folder"
@@ -480,6 +495,12 @@ export function FileBrowser({
                 )}
                 iconClassName={view === "grid" ? "size-12" : "size-4"}
               />
+              {view === "grid" && collaborator && (
+                <Badge variant="outline" className="absolute top-3 left-3 z-10 h-6 gap-1.5 border-border/50 bg-background/70 px-1.5 text-[11px] font-medium text-foreground shadow-sm backdrop-blur-sm">
+                  <IdentityAvatar user={collaborator} size="sm" className="!size-4 after:!border-0" />
+                  @{collaborator.username}
+                </Badge>
+              )}
               <span className={cn(
                 "min-w-0 flex-1 text-foreground",
                 view === "grid" && "absolute inset-x-0 bottom-0 z-10 px-3 pb-3 pt-10",
@@ -489,20 +510,24 @@ export function FileBrowser({
                   {file.name}
                 </span>
                 <span className={cn(
-                  "mt-0.5 block text-xs text-foreground",
+                  "mt-1 flex flex-wrap items-center gap-1 text-xs text-foreground",
                   view === "grid" && true && "text-white", //hasMediaPreview
                 )}>
                   {file.type === "folder" ? (
-                    "Folder"
+                    <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none", view === "grid" && "border-white/20 bg-black/30 text-white backdrop-blur-sm")}>Folder</Badge>
                   ) : (
                     <>
-                      {file.size}
-                      {duration && <> · {duration}</>}
+                      <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none", view === "grid" && "border-white/20 bg-black/30 text-white backdrop-blur-sm")}>{file.size}</Badge>
+                      {duration && <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none", view === "grid" && "border-white/20 bg-black/30 text-white backdrop-blur-sm")}>{duration}</Badge>}
                     </>
                   )}
+                  {file.isShared && <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none", view === "grid" ? "border-white/20 bg-black/35 text-white shadow-sm backdrop-blur-sm" : "text-primary")}>Shared</Badge>}
                 </span>
               </span>
             </button>
+            {view === "list" && (
+              collaborator && <span className="hidden w-48 items-center justify-end gap-2 truncate text-sm text-muted-foreground sm:flex"><IdentityAvatar user={collaborator} size="sm" className="!size-6 after:!border-0" />@{collaborator.username}</span>
+            )}
             {view === "list" && (
               <span className="hidden w-32 text-right text-xs text-foreground sm:block">
                 {file.createdAt
@@ -510,7 +535,7 @@ export function FileBrowser({
                   : "—"}
               </span>
             )}
-            <FileActions
+            {!hideActions && <FileActions
               file={file}
               onDownload={onDownload}
               onMove={onMove}
@@ -519,8 +544,21 @@ export function FileBrowser({
               onDelete={onDelete}
               onRestore={onRestore}
               isTrash={isTrash}
+              readOnly={readOnly}
               className={view === "grid" ? "absolute top-2 right-2" : undefined}
-            />
+            />}
+            {hideActions && getDownloadUrl && file.type === "file" && (
+              <Button
+                nativeButton={false}
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                render={<a href={getDownloadUrl(file)} />}
+              >
+                <DownloadIcon />
+                <span className="hidden sm:inline">Download</span>
+              </Button>
+            )}
           </motion.article>
           );
         })}

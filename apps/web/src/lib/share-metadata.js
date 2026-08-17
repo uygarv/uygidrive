@@ -38,10 +38,11 @@ async function getShareInfo(type, accessId) {
   return response.json();
 }
 
-function mediaType(contentType = "") {
-  if (contentType.startsWith("image/")) return "image";
-  if (contentType.startsWith("video/")) return "video";
-  if (contentType.startsWith("audio/")) return "audio";
+function mediaType(contentType) {
+  const normalizedContentType = typeof contentType === "string" ? contentType : "";
+  if (normalizedContentType.startsWith("image/")) return "image";
+  if (normalizedContentType.startsWith("video/")) return "video";
+  if (normalizedContentType.startsWith("audio/")) return "audio";
 
   return "file";
 }
