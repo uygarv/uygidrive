@@ -414,15 +414,15 @@ export function DeleteDialog({ file, onClose, onDelete, permanent = false }) {
   );
 }
 
-export function ShareDialog({ file, closing = false, onClose }) {
+export function ShareDialog({ file, currentUserId = null, closing = false, onClose }) {
   return (
     <Dialog open={Boolean(file) && !closing} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      {file && <ShareContent key={file.id} file={file} onClose={onClose} />}
+      {file && <ShareContent key={file.id} file={file} currentUserId={currentUserId} onClose={onClose} />}
     </Dialog>
   );
 }
 
-function ShareContent({ file, onClose }) {
+function ShareContent({ file, currentUserId, onClose }) {
   const [visibility, setVisibility] = useState(file.accessMode || "private");
   const [linkExpiry, setLinkExpiry] = useState("7d");
   const [createdLink, setCreatedLink] = useState(null);
@@ -484,10 +484,14 @@ function ShareContent({ file, onClose }) {
   }
   useEffect(() => {
     if (visibility !== "private" || recipientQuery.trim().length < 2) return undefined;
-    const timer = window.setTimeout(() => driveApi.findUsers(recipientQuery.trim()).then((result) => setRecipientResults(result.users || [])).catch(() => setRecipientResults([])), 180);
+    const timer = window.setTimeout(() => driveApi.findUsers(recipientQuery.trim()).then((result) => setRecipientResults((result.users || []).filter((user) => user.id !== currentUserId))).catch(() => setRecipientResults([])), 180);
     return () => window.clearTimeout(timer);
-  }, [recipientQuery, visibility]);
+  }, [currentUserId, recipientQuery, visibility]);
   function addRecipient(user) {
+    if (user.id === currentUserId) {
+      toast.error("You can’t share an item with yourself");
+      return;
+    }
     if (pendingRecipient?.status === "pending" || recipients.some((share) => share.recipientId === user.id)) return;
     const pending = { user, role: newRecipientRole, status: "pending", share: null };
     setPendingRecipient(pending);
@@ -843,7 +847,7 @@ function AudioPreview({ url, onReady, onError }) {
         </div>
         <div className="relative mt-3 flex items-center justify-between text-xs tabular-nums text-muted-foreground">
           <span>{timeLabel(currentTime)}</span>
-          <span className="absolute left-1/2 -translate-x-1/2 rounded-full bg-muted px-2 py-0.5 font-medium text-foreground shadow-xs">{timeLabel(currentTime)}</span>
+          
           <span>{timeLabel(duration)}</span>
         </div>
         <div className="relative mt-5 flex items-center justify-center gap-2">
@@ -1022,6 +1026,8 @@ function VideoPreview({ url, onReady, onError, onNavigationToneChange }) {
 }
 
 const pdfWorkerUrl = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+const PDF_RENDER_AHEAD = 1;
+const PDF_MAX_CANVAS_PIXELS = 4_000_000;
 
 function PdfPageThumbnail({ pdf, pageNumber, active, onSelect }) {
   const canvasRef = useRef(null);
@@ -1074,12 +1080,13 @@ function PdfPageList({ pdf, pageCount, pageNumber, onSelect }) {
   );
 }
 
-function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError }) {
+function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onDimensions, onError }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     if (!viewerWidth) return undefined;
     let cancelled = false;
     let renderTask;
+    let canvas;
     async function render() {
       try {
         const page = await pdf.getPage(pageNumber);
@@ -1087,13 +1094,17 @@ function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError }) {
         const naturalViewport = page.getViewport({ scale: 1 });
         const fitScale = Math.max(0.25, Math.min(1.5, (viewerWidth - 48) / naturalViewport.width));
         const viewport = page.getViewport({ scale: fitScale * zoom });
-        const canvas = canvasRef.current;
+        onDimensions(pageNumber, {
+          width: Math.floor(viewport.width),
+          height: Math.floor(viewport.height),
+        });
+        canvas = canvasRef.current;
         const context = canvas.getContext("2d");
         if (!context) return;
         // A single high-zoom page can still be enormous on retina displays. Keep
         // its backing canvas below a practical memory ceiling.
         const requestedOutputScale = window.devicePixelRatio || 1;
-        const outputScale = Math.min(requestedOutputScale, Math.sqrt(16_000_000 / (viewport.width * viewport.height)));
+        const outputScale = Math.min(requestedOutputScale, Math.sqrt(PDF_MAX_CANVAS_PIXELS / (viewport.width * viewport.height)));
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -1109,12 +1120,78 @@ function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError }) {
       }
     }
     render();
-    return () => { cancelled = true; renderTask?.cancel(); };
-  }, [onError, pageNumber, pdf, viewerWidth, zoom]);
+    return () => {
+      cancelled = true;
+      renderTask?.cancel();
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    };
+  }, [onDimensions, onError, pageNumber, pdf, viewerWidth, zoom]);
   return (
-    <section data-page-number={pageNumber} className="flex scroll-mt-5 justify-center">
-      <canvas ref={canvasRef} className="border bg-white shadow-sm" aria-label={`Page ${pageNumber}`} />
-    </section>
+    <canvas ref={canvasRef} className="border bg-white shadow-sm" aria-label={`Page ${pageNumber}`} />
+  );
+}
+
+function PdfDocumentScroller({ pdf, pageCount, pageNumber, viewerRef, viewerWidth, zoom, onPageChange, onError }) {
+  const pageRefs = useRef(new Map());
+  const [pageDimensions, setPageDimensions] = useState({});
+  const renderedPages = useMemo(() => {
+    const startPage = Math.max(1, pageNumber - PDF_RENDER_AHEAD);
+    const endPage = Math.min(pageCount, pageNumber + PDF_RENDER_AHEAD);
+    return new Set(Array.from({ length: endPage - startPage + 1 }, (_, index) => startPage + index));
+  }, [pageCount, pageNumber]);
+  const estimatedHeight = Math.max(480, Math.round(Math.max(viewerWidth - 48, 420) * 1.414 * zoom));
+
+  const setPageRef = useCallback((page, element) => {
+    if (element) pageRefs.current.set(page, element);
+    else pageRefs.current.delete(page);
+  }, []);
+  const saveDimensions = useCallback((page, dimensions) => {
+    setPageDimensions((current) => {
+      const existing = current[page];
+      if (existing?.width === dimensions.width && existing?.height === dimensions.height) return current;
+      return { ...current, [page]: dimensions };
+    });
+  }, []);
+  useEffect(() => {
+    const root = viewerRef.current;
+    if (!root) return undefined;
+    const observer = new IntersectionObserver((entries) => {
+      const mostVisible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
+      if (mostVisible) onPageChange(Number(mostVisible.target.dataset.pageNumber));
+    }, { root, threshold: [0.25, 0.6] });
+    pageRefs.current.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [onPageChange, pageCount, viewerRef]);
+
+  return (
+    <div className="mx-auto flex min-w-max flex-col items-center gap-5">
+      {Array.from({ length: pageCount }, (_, index) => {
+        const page = index + 1;
+        const dimensions = pageDimensions[page];
+        const isRendered = renderedPages.has(page);
+        return (
+          <section
+            key={page}
+            ref={(element) => setPageRef(page, element)}
+            data-page-number={page}
+            className="flex scroll-mt-5 justify-center"
+            style={{ minHeight: dimensions?.height || estimatedHeight, minWidth: dimensions?.width || 1 }}
+            aria-label={`Page ${page}`}
+          >
+            {isRendered ? (
+              <PdfDocumentPage pdf={pdf} pageNumber={page} viewerWidth={viewerWidth} zoom={zoom} onDimensions={saveDimensions} onError={onError} />
+            ) : (
+              <span className="sr-only">Page {page} loads as you scroll.</span>
+            )}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1156,9 +1233,14 @@ function PdfPreview({ file, url, onReady, onError }) {
     return () => observer.disconnect();
   }, []);
 
-  function changePage(nextPage) {
+  const setVisiblePage = useCallback((nextPage) => {
     const targetPage = Math.min(pageCount, Math.max(1, nextPage));
     setPageNumber(targetPage);
+  }, [pageCount]);
+  function changePage(nextPage) {
+    const targetPage = Math.min(pageCount, Math.max(1, nextPage));
+    setVisiblePage(targetPage);
+    viewerRef.current?.querySelector(`[data-page-number="${targetPage}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   async function printDocument() {
     const response = await fetch(url, { credentials: "include" });
@@ -1196,18 +1278,7 @@ function PdfPreview({ file, url, onReady, onError }) {
           ref={viewerRef}
           className="min-h-0 flex-1 overflow-auto p-5 sm:p-8"
         >
-          <div className="flex min-h-full min-w-max flex-col items-center justify-center">
-            {pdf && (
-              <PdfDocumentPage
-                key={pageNumber}
-                pdf={pdf}
-                pageNumber={pageNumber}
-                viewerWidth={viewerWidth}
-                zoom={zoom}
-                onError={onError}
-              />
-            )}
-          </div>
+          {pdf && <PdfDocumentScroller pdf={pdf} pageCount={pageCount} pageNumber={pageNumber} viewerRef={viewerRef} viewerWidth={viewerWidth} zoom={zoom} onPageChange={setVisiblePage} onError={onError} />}
         </div>
       </div>
       <Sheet open={isPagesOpen} onOpenChange={setIsPagesOpen}>
@@ -1365,7 +1436,7 @@ export function PreviewDialog({ file, files = [], onClose, onSelect, getContentU
           <Button className="shrink-0" variant="ghost" size="icon" onClick={requestClose} aria-label="Close preview" title="Close preview"><XIcon /></Button>
           <div className="min-w-0 flex-1">
             <DialogTitle className="truncate text-sm sm:text-base">{activeFile.name}</DialogTitle>
-            <DialogDescription className="mt-0.5 flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden whitespace-nowrap"><Badge variant="outline">{activeFile.size}</Badge>{activeFile.isShared && <Badge variant="outline">Shared</Badge>}{activeFile.owner?.username && !activeFile.uploadedBy?.username && <span className="inline-flex min-w-0 items-center gap-1 truncate"><IdentityAvatar user={activeFile.owner} size="sm" />@{activeFile.owner.username}</span>}{activeFile.uploadedBy?.username && <span className="inline-flex min-w-0 items-center gap-1 truncate"><IdentityAvatar user={activeFile.uploadedBy} size="sm" />Uploaded by @{activeFile.uploadedBy.username}</span>}</DialogDescription>
+            <DialogDescription className="mt-0.5 flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden whitespace-nowrap"><Badge variant="outline">{activeFile.size}</Badge>{activeFile.isShared && <Badge variant="outline">Shared</Badge>}{activeFile.owner?.username && !activeFile.uploadedBy?.username && <span className="inline-flex min-w-0 items-center gap-1 truncate"><IdentityAvatar user={activeFile.owner} size="sm" className="!size-5" />@{activeFile.owner.username}</span>}{activeFile.uploadedBy?.username && <span className="inline-flex min-w-0 items-center gap-1 truncate"><IdentityAvatar user={activeFile.uploadedBy} size="sm" className="!size-5" />Uploaded by @{activeFile.uploadedBy.username}</span>}</DialogDescription>
           </div>
           <Button className="shrink-0" nativeButton={false} variant="outline" size="icon-sm" aria-label="Download" title="Download" render={<a href={getDownloadUrl?.(activeFile) || driveApi.downloadUrl(activeFile.id)} />}><DownloadIcon /></Button>
         </DialogHeader>

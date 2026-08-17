@@ -243,23 +243,38 @@ export function Navigation({
 }) {
   const isTrash = activeSection === "trash";
   const isShared = activeSection === "shared";
+  const reduceMotion = useReducedMotion();
+  const showActions = showContentActions && !isTrash && (!isShared || canManageContent);
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <Brand className="px-2 py-1" href="/drive" />
-      {showContentActions && (!isShared || canManageContent) && <div className="flex flex-col gap-2 px-1">
-        <Button size={compact ? "default" : "lg"} onClick={onUpload}>
-          <UploadIcon data-icon="inline-start" />
-          Upload files
-        </Button>
-        <Button
-          variant="outline"
-          size={compact ? "default" : "lg"}
-          onClick={onFolder}
-        >
-          <FolderPlusIcon data-icon="inline-start" />
-          New folder
-        </Button>
-      </div>}
+      <AnimatePresence initial={!reduceMotion}>
+        {showActions && (
+          <motion.div
+            key="content-actions"
+            initial={{ height: 0, opacity: 0, y: reduceMotion ? 0 : -8 }}
+            animate={{ height: "auto", opacity: 1, y: 0 }}
+            exit={{ height: 0, opacity: 0, y: reduceMotion ? 0 : -8 }}
+            transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }}
+            className="overflow-hidden"
+          >
+            <div className="flex flex-col gap-2 px-1">
+              <Button size={compact ? "default" : "lg"} onClick={onUpload}>
+                <UploadIcon data-icon="inline-start" />
+                Upload files
+              </Button>
+              <Button
+                variant="outline"
+                size={compact ? "default" : "lg"}
+                onClick={onFolder}
+              >
+                <FolderPlusIcon data-icon="inline-start" />
+                New folder
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <Separator />
       <nav aria-label="Drive navigation" className="flex flex-col gap-1">
         <Button
@@ -390,6 +405,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const reduceMotion = useReducedMotion();
   const uploadNoticeTimer = useRef(null);
   const shareCloseTimer = useRef(null);
+  const navigationTimer = useRef(null);
   const [folderId, setFolderId] = useState(null);
   const [sharedRole, setSharedRole] = useState(null);
   const [activeSection, setActiveSection] = useState(initialSection);
@@ -412,10 +428,12 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [uploadNotice, setUploadNotice] = useState(null);
+  const [isNavigating, setIsNavigating] = useState(false);
   const openUploaderForResume = useCallback(() => setIsUploadOpen(true), []);
 
   useEffect(() => () => window.clearTimeout(uploadNoticeTimer.current), []);
   useEffect(() => () => window.clearTimeout(shareCloseTimer.current), []);
+  useEffect(() => () => window.clearTimeout(navigationTimer.current), []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -492,16 +510,8 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     uploadNoticeTimer.current = window.setTimeout(() => setUploadNotice(null), 3600);
   }, []);
   function selectSection(section) {
-    if (section === activeSection) return;
-    setActiveSection(section);
-    setFolderId(null);
-    setBreadcrumbs([]);
-    setSharedRole(null);
-    setSearch("");
-    setDebouncedSearch("");
-    resetPagination();
-    setIsMobileNavOpen(false);
-    router.push(section === "trash" ? "/trash" : section === "shared" ? "/shared" : "/drive");
+    if (section === activeSection || isNavigating) return;
+    navigate(section === "trash" ? "/trash" : section === "shared" ? "/shared" : "/drive");
   }
   function changeView(nextView) {
     setView(nextView);
@@ -676,6 +686,16 @@ export function DriveWorkspace({ initialSection = "drive" }) {
       router.push("/");
     }
   }
+  function navigate(path) {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    setIsMobileNavOpen(false);
+    if (reduceMotion) {
+      router.push(path);
+      return;
+    }
+    navigationTimer.current = window.setTimeout(() => router.push(path), 180);
+  }
   function downloadFile(file) {
     const link = document.createElement("a");
     link.href = driveApi.downloadUrl(file.id);
@@ -693,12 +713,13 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     avatarUrl: sessionQuery.data?.user?.avatarUrl,
     userIsLoading: sessionQuery.isPending,
     onSignOut: signOut,
-    onProfile: () => router.push("/profile"),
+    onProfile: () => navigate("/profile"),
     activeSection,
     onSectionChange: selectSection,
     canManageContent: !isShared || (Boolean(folderId) && sharedRole === "editor"),
+    showContentActions: !isNavigating,
   };
-  const canManageCurrentFolder = !isShared || (Boolean(folderId) && sharedRole === "editor");
+  const canManageCurrentFolder = !isTrash && (!isShared || (Boolean(folderId) && sharedRole === "editor"));
   const pathBreadcrumbs = isTrash
     ? [trashBreadcrumb]
     : isShared
@@ -1041,7 +1062,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         onClose={() => setDeleteTarget(null)}
         onDelete={(file) => remove.mutateAsync({ file, permanent: Boolean(deleteTarget?.permanent) })}
       />
-      <ShareDialog file={shareFile} closing={isShareClosing} onClose={closeShare} />
+      <ShareDialog file={shareFile} currentUserId={sessionQuery.data?.user?.id} closing={isShareClosing} onClose={closeShare} />
       <PreviewDialog
         file={previewFile}
         files={isTrash ? [] : filesQuery.data?.files || []}

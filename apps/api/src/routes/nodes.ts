@@ -154,9 +154,9 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.get("/v1/users", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => {
-    await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth);
     const { query } = parse(z.object({ query: z.string().trim().min(2).max(120) }), request.query);
-    return { users: (await context.drive.findUsers(query.toLowerCase())).map(userIdentityResponse) };
+    return { users: (await context.drive.findUsers(query.toLowerCase())).filter((candidate) => candidate.id !== user.uid).map(userIdentityResponse) };
   });
 
   app.get("/v1/trash", async (request) => {

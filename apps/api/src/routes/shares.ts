@@ -35,6 +35,9 @@ export async function registerShareRoutes(app: FastifyInstance, context: AppCont
     const user = await requireUser(request, context.firebase.auth);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const body = parse(createShareSchema, request.body);
+    if (body.mode === "recipient" && body.recipientId === user.uid) {
+      throw new ApiError(422, "SELF_SHARE_NOT_ALLOWED", "You can’t share an item with yourself.");
+    }
     const publicId = body.mode === "public" ? id("pub") : null;
     const rawToken = body.mode === "link" ? secretToken() : undefined;
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;

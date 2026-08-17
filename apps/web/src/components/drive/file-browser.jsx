@@ -134,7 +134,7 @@ function FileThumbnail({ file, className, iconClassName, grid = false, contentUr
         className,
       )}
     >
-      <FileTypeIcon file={file} className={iconClassName} />
+      {!hasThumbnail && <FileTypeIcon file={file} className={iconClassName} />}
 
       {hasThumbnail && (
         <img
