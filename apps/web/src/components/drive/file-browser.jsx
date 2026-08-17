@@ -496,7 +496,7 @@ export function FileBrowser({
                 iconClassName={view === "grid" ? "size-12" : "size-4"}
               />
               {view === "grid" && collaborator && (
-                <Badge variant="outline" className="absolute top-3 left-3 z-10 h-6 gap-1.5 border-border/50 bg-background/70 px-1.5 text-[11px] font-medium text-foreground shadow-sm backdrop-blur-sm">
+                <Badge variant="outline" className="absolute top-3 left-3 z-10 hidden h-6 gap-1.5 border-border/50 bg-background/70 px-1.5 text-[11px] font-medium text-foreground shadow-sm backdrop-blur-sm sm:inline-flex">
                   <IdentityAvatar user={collaborator} size="sm" className="!size-4 after:!border-0" />
                   @{collaborator.username}
                 </Badge>
@@ -522,6 +522,7 @@ export function FileBrowser({
                     </>
                   )}
                   {file.isShared && <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none", view === "grid" ? "border-white/20 bg-black/35 text-white shadow-sm backdrop-blur-sm" : "text-primary")}>Shared</Badge>}
+                  {collaborator && <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none sm:hidden", view === "grid" ? "border-white/20 bg-black/30 text-white backdrop-blur-sm" : "text-muted-foreground")}>@{collaborator.username}</Badge>}
                 </span>
               </span>
             </button>

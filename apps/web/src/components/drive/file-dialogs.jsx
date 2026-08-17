@@ -1062,16 +1062,19 @@ function PdfPageThumbnail({ pdf, pageNumber, active, onSelect }) {
 }
 
 function PdfPageList({ pdf, pageCount, pageNumber, onSelect }) {
+  const startPage = Math.max(1, pageNumber - 6);
+  const endPage = Math.min(pageCount, pageNumber + 6);
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
-      {Array.from({ length: pageCount }, (_, index) => (
-        <PdfPageThumbnail key={index + 1} pdf={pdf} pageNumber={index + 1} active={pageNumber === index + 1} onSelect={onSelect} />
+      <p className="px-2 py-1 text-xs text-muted-foreground">Pages {startPage}–{endPage} of {pageCount}</p>
+      {Array.from({ length: endPage - startPage + 1 }, (_, index) => (
+        <PdfPageThumbnail key={startPage + index} pdf={pdf} pageNumber={startPage + index} active={pageNumber === startPage + index} onSelect={onSelect} />
       ))}
     </div>
   );
 }
 
-function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError, pageRef }) {
+function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     if (!viewerWidth) return undefined;
@@ -1087,7 +1090,10 @@ function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError, pageRef 
         const canvas = canvasRef.current;
         const context = canvas.getContext("2d");
         if (!context) return;
-        const outputScale = window.devicePixelRatio || 1;
+        // A single high-zoom page can still be enormous on retina displays. Keep
+        // its backing canvas below a practical memory ceiling.
+        const requestedOutputScale = window.devicePixelRatio || 1;
+        const outputScale = Math.min(requestedOutputScale, Math.sqrt(16_000_000 / (viewport.width * viewport.height)));
         canvas.width = Math.floor(viewport.width * outputScale);
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = `${Math.floor(viewport.width)}px`;
@@ -1106,7 +1112,7 @@ function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError, pageRef 
     return () => { cancelled = true; renderTask?.cancel(); };
   }, [onError, pageNumber, pdf, viewerWidth, zoom]);
   return (
-    <section ref={pageRef} data-page-number={pageNumber} className="flex scroll-mt-5 justify-center">
+    <section data-page-number={pageNumber} className="flex scroll-mt-5 justify-center">
       <canvas ref={canvasRef} className="border bg-white shadow-sm" aria-label={`Page ${pageNumber}`} />
     </section>
   );
@@ -1114,7 +1120,6 @@ function PdfDocumentPage({ pdf, pageNumber, viewerWidth, zoom, onError, pageRef 
 
 function PdfPreview({ file, url, onReady, onError }) {
   const viewerRef = useRef(null);
-  const pageRefs = useRef(new Map());
   const [pdf, setPdf] = useState(null);
   const [pageCount, setPageCount] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
@@ -1154,7 +1159,6 @@ function PdfPreview({ file, url, onReady, onError }) {
   function changePage(nextPage) {
     const targetPage = Math.min(pageCount, Math.max(1, nextPage));
     setPageNumber(targetPage);
-    pageRefs.current.get(targetPage)?.scrollIntoView({ block: "start", behavior: "auto" });
   }
   async function printDocument() {
     const response = await fetch(url, { credentials: "include" });
@@ -1191,31 +1195,18 @@ function PdfPreview({ file, url, onReady, onError }) {
         <div
           ref={viewerRef}
           className="min-h-0 flex-1 overflow-auto p-5 sm:p-8"
-          onScroll={(event) => {
-            const containerTop = event.currentTarget.getBoundingClientRect().top;
-            const visiblePages = [...event.currentTarget.querySelectorAll("[data-page-number]")];
-            const closestPage = visiblePages.reduce((closest, element) => {
-              const distance = Math.abs(element.getBoundingClientRect().top - containerTop);
-              return distance < closest.distance ? { distance, page: Number(element.dataset.pageNumber) } : closest;
-            }, { distance: Number.POSITIVE_INFINITY, page: pageNumber });
-            if (closestPage.page !== pageNumber) setPageNumber(closestPage.page);
-          }}
         >
-          <div className="flex min-h-full min-w-max flex-col items-center gap-5">
-            {pdf && Array.from({ length: pageCount }, (_, index) => (
+          <div className="flex min-h-full min-w-max flex-col items-center justify-center">
+            {pdf && (
               <PdfDocumentPage
-                key={index + 1}
+                key={pageNumber}
                 pdf={pdf}
-                pageNumber={index + 1}
+                pageNumber={pageNumber}
                 viewerWidth={viewerWidth}
                 zoom={zoom}
                 onError={onError}
-                pageRef={(node) => {
-                  if (node) pageRefs.current.set(index + 1, node);
-                  else pageRefs.current.delete(index + 1);
-                }}
               />
-            ))}
+            )}
           </div>
         </div>
       </div>
@@ -1369,14 +1360,14 @@ export function PreviewDialog({ file, files = [], onClose, onSelect, getContentU
   }
   return (
     <Dialog open={Boolean(file) && !closingFile} onOpenChange={(open) => !open && requestClose()}>
-      <DialogContent keepMounted showCloseButton={false} className={cn("inset-0 top-0 left-0 z-50 grid h-dvh w-screen max-w-none translate-x-0 translate-y-0 gap-0 rounded-none bg-background/45 p-0 backdrop-blur-sm data-open:slide-in-from-bottom-2 data-closed:slide-out-to-bottom-2 sm:max-w-none", activeIndex >= 0 ? "grid-rows-[auto_minmax(0,1fr)_auto]" : "grid-rows-[auto_minmax(0,1fr)]")}>
-        <DialogHeader className="flex-row items-center gap-3 border-b bg-background/40 px-3 py-2 sm:px-5">
-          <Button variant="ghost" size="icon" onClick={requestClose} aria-label="Close preview" title="Close preview"><XIcon /></Button>
+      <DialogContent keepMounted showCloseButton={false} className={cn("inset-0 top-0 left-0 z-50 grid h-dvh w-dvw max-w-[100dvw] translate-x-0 translate-y-0 gap-0 overflow-hidden rounded-none bg-background/45 p-0 backdrop-blur-sm data-open:slide-in-from-bottom-2 data-closed:slide-out-to-bottom-2 sm:max-w-[100dvw]", activeIndex >= 0 ? "grid-rows-[auto_minmax(0,1fr)_auto]" : "grid-rows-[auto_minmax(0,1fr)]")}>
+        <DialogHeader className="w-full min-w-0 flex-row items-center gap-3 overflow-hidden border-b bg-background/40 px-3 py-2 sm:px-5">
+          <Button className="shrink-0" variant="ghost" size="icon" onClick={requestClose} aria-label="Close preview" title="Close preview"><XIcon /></Button>
           <div className="min-w-0 flex-1">
             <DialogTitle className="truncate text-sm sm:text-base">{activeFile.name}</DialogTitle>
-            <DialogDescription className="mt-0.5 flex items-center gap-2"><Badge variant="outline">{activeFile.size}</Badge>{activeFile.isShared && <Badge variant="outline">Shared</Badge>}{activeFile.owner?.username && !activeFile.uploadedBy?.username && <span className="inline-flex items-center gap-1"><IdentityAvatar user={activeFile.owner} size="sm" />@{activeFile.owner.username}</span>}{activeFile.uploadedBy?.username && <span className="inline-flex items-center gap-1"><IdentityAvatar user={activeFile.uploadedBy} size="sm" />Uploaded by @{activeFile.uploadedBy.username}</span>}</DialogDescription>
+            <DialogDescription className="mt-0.5 flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden whitespace-nowrap"><Badge variant="outline">{activeFile.size}</Badge>{activeFile.isShared && <Badge variant="outline">Shared</Badge>}{activeFile.owner?.username && !activeFile.uploadedBy?.username && <span className="inline-flex min-w-0 items-center gap-1 truncate"><IdentityAvatar user={activeFile.owner} size="sm" />@{activeFile.owner.username}</span>}{activeFile.uploadedBy?.username && <span className="inline-flex min-w-0 items-center gap-1 truncate"><IdentityAvatar user={activeFile.uploadedBy} size="sm" />Uploaded by @{activeFile.uploadedBy.username}</span>}</DialogDescription>
           </div>
-          <Button nativeButton={false} variant="outline" size="sm" render={<a href={getDownloadUrl?.(activeFile) || driveApi.downloadUrl(activeFile.id)} />}><DownloadIcon /> <span className="hidden sm:inline">Download</span></Button>
+          <Button className="shrink-0" nativeButton={false} variant="outline" size="icon-sm" aria-label="Download" title="Download" render={<a href={getDownloadUrl?.(activeFile) || driveApi.downloadUrl(activeFile.id)} />}><DownloadIcon /></Button>
         </DialogHeader>
         <div
           className="flex min-h-0 overflow-hidden"

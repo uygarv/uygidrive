@@ -888,38 +888,38 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                   </AnimatePresence>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {canManageCurrentFolder ? <Button
+              {canManageCurrentFolder && <div className="flex flex-wrap gap-2">
+                <Button
                   className="sm:hidden"
                   onClick={() => setIsUploadOpen(true)}
                 >
                   <UploadIcon data-icon="inline-start" />
                   Upload
-                </Button> : null}
-                {canManageCurrentFolder ? <Button
+                </Button>
+                <Button
                   className="sm:hidden"
                   variant="outline"
                   onClick={() => setIsFolderOpen(true)}
                 >
                   <FolderPlusIcon data-icon="inline-start" />
                   New folder
-                </Button> : null}
-                {canManageCurrentFolder ? <Button
+                </Button>
+                <Button
                   className="hidden sm:inline-flex"
                   onClick={() => setIsUploadOpen(true)}
                 >
                   <UploadIcon data-icon="inline-start" />
                   Upload
-                </Button> : null}
-                {canManageCurrentFolder ? <Button
+                </Button>
+                <Button
                   className="hidden sm:inline-flex"
                   variant="outline"
                   onClick={() => setIsFolderOpen(true)}
                 >
                   <FolderPlusIcon data-icon="inline-start" />
                   New folder
-                </Button> : null}
-              </div>
+                </Button>
+              </div>}
             </div>
           </motion.div>
           <section aria-label="File browser" className="flex flex-col gap-4">
