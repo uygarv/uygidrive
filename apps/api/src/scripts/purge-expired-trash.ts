@@ -10,5 +10,6 @@ const firebase = createFirebaseServices(config);
 const repository = new FirestoreDriveRepository(firebase.firestore, config.defaultStorageLimitBytes);
 const drive = new DriveService(repository, new StorageService(firebase.bucket), config.uploadIntentTtlMinutes);
 const result = await drive.purgeExpiredTrash(config.trashRetentionDays);
+const uploads = await drive.purgeExpiredUploads();
 
-console.log(`Purged ${result.deletedItems} item${result.deletedItems === 1 ? "" : "s"} from Trash (checked ${result.candidates} expired root candidates).`);
+console.log(`Purged ${result.deletedItems} item${result.deletedItems === 1 ? "" : "s"} from Trash (checked ${result.candidates} expired root candidates) and cancelled ${uploads.candidates} expired upload${uploads.candidates === 1 ? "" : "s"}.`);

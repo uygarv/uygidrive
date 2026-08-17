@@ -55,6 +55,7 @@ export type UploadRecord = {
   expectedBytes: number;
   receivedBytes: number;
   storageKey: string;
+  resumableSessionUri: string;
   status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
   expiresAt: Date;
   createdAt: Date;

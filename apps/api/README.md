@@ -34,7 +34,7 @@ The script creates only missing documents. It never overwrites existing Firestor
 
 ## Trash retention
 
-Deleting an item moves it to Trash. It stays recoverable for `TRASH_RETENTION_DAYS` (30 by default); restoring a folder also restores its contents. Expired items must be purged by a daily scheduled job. Either run the CLI from a trusted scheduler:
+Deleting an item moves it to Trash. It stays recoverable for `TRASH_RETENTION_DAYS` (30 by default); restoring a folder also restores its contents. The same daily job purges expired Trash items and cancels expired resumable uploads so their quota reservations are released. Either run the CLI from a trusted scheduler:
 
 ```bash
 npm run purge:trash

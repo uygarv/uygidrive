@@ -19,6 +19,18 @@ export type StreamResult = {
   durationSeconds?: number;
 };
 
+export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+export const UPLOAD_CHUNK_ALIGNMENT = 256 * 1024;
+
+type ResumableResponse = { status: number; headers: Record<string, string | string[] | undefined>; data?: unknown };
+type StorageAuthClient = { request(options: Record<string, unknown>): Promise<ResumableResponse> };
+
+function receivedBytesFromRange(range: string | string[] | undefined) {
+  const value = Array.isArray(range) ? range[0] : range;
+  const match = value?.match(/bytes=0-(\d+)/i);
+  return match ? Number(match[1]) + 1 : 0;
+}
+
 export type PreviewStreamResult = { stream: Readable; contentType: "image/webp" };
 
 const MAX_PREVIEW_SOURCE_BYTES = 50 * 1024 * 1024;
@@ -149,6 +161,77 @@ function runFfmpegToStream(args: string[]): Readable {
 
 export class StorageService {
   constructor(private readonly bucket: FirebaseServices["bucket"]) {}
+
+  private authClient() {
+    return (this.bucket.storage as unknown as { authClient: StorageAuthClient }).authClient;
+  }
+
+  async createResumableUpload(upload: Pick<UploadRecord, "storageKey" | "contentType" | "ownerId" | "nodeId">) {
+    const file = this.bucket.file(upload.storageKey);
+    const [uri] = await file.createResumableUpload({
+      metadata: {
+        contentType: upload.contentType || "application/octet-stream",
+        metadata: { ownerId: upload.ownerId, nodeId: upload.nodeId },
+      },
+    });
+    return uri;
+  }
+
+  private requestResumable(uri: string, options: Record<string, unknown>) {
+    return this.authClient().request({
+      url: uri,
+      method: "PUT",
+      validateStatus: (status: number) => status === 308 || (status >= 200 && status < 300),
+      ...options,
+    });
+  }
+
+  async getResumableProgress(upload: UploadRecord) {
+    const response = await this.requestResumable(upload.resumableSessionUri, {
+      data: Buffer.alloc(0),
+      headers: { "Content-Length": "0", "Content-Range": `bytes */${upload.expectedBytes}` },
+    });
+    return { receivedBytes: response.status === 308 ? receivedBytesFromRange(response.headers.range) : upload.expectedBytes, complete: response.status !== 308 };
+  }
+
+  async uploadChunk(upload: UploadRecord, source: Readable, start: number, end: number) {
+    const response = await this.requestResumable(upload.resumableSessionUri, {
+      data: source,
+      headers: {
+        "Content-Length": String(end - start + 1),
+        "Content-Range": `bytes ${start}-${end}/${upload.expectedBytes}`,
+        "Content-Type": "application/octet-stream",
+      },
+    });
+    return {
+      receivedBytes: response.status === 308 ? receivedBytesFromRange(response.headers.range) : upload.expectedBytes,
+      complete: response.status !== 308,
+    };
+  }
+
+  async cancelResumableUpload(upload: UploadRecord) {
+    await this.authClient().request({
+      url: upload.resumableSessionUri,
+      method: "DELETE",
+      data: Buffer.alloc(0),
+      validateStatus: (status: number) => status === 404 || status === 410 || (status >= 200 && status < 500),
+    });
+  }
+
+  async completeResumableUpload(upload: UploadRecord) {
+    const file = this.bucket.file(upload.storageKey);
+    const [metadata] = await file.getMetadata();
+    let durationSeconds: number | undefined;
+    if (isVideoContentType(upload.contentType)) {
+      try {
+        const [signedUrl] = await file.getSignedUrl({ version: "v4", action: "read", expires: Date.now() + 5 * 60 * 1000 });
+        durationSeconds = await probeDuration(signedUrl);
+      } catch {
+        // Metadata extraction is best effort.
+      }
+    }
+    return { bytes: Number(metadata.size ?? upload.expectedBytes), checksum: typeof metadata.md5Hash === "string" ? metadata.md5Hash : null, durationSeconds };
+  }
 
   async upload(
     upload: UploadRecord,

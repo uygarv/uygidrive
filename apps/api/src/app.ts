@@ -34,7 +34,7 @@ export type BuildAppOptions = {
 };
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.config.environment !== "test", bodyLimit: 1_048_576 });
+  const app = Fastify({ logger: options.config.environment !== "test", bodyLimit: 20 * 1024 * 1024, });
   const repository = options.repository ?? new FirestoreDriveRepository(options.firebase.firestore, options.config.defaultStorageLimitBytes);
   const context: AppContext = {
     config: options.config,
@@ -48,7 +48,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(cors, {
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "X-CSRF-Token", "X-Upload-Content-Type", "Range"],
+    allowedHeaders: ["Content-Type", "Content-Range", "X-CSRF-Token", "X-Upload-Content-Type", "Range"],
     origin(origin, callback) {
       if (!origin || context.config.webOrigins.includes(origin)) callback(null, true);
       else callback(new Error("Origin is not allowed by CORS."), false);

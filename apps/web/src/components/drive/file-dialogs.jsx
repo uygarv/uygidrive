@@ -20,6 +20,7 @@ import {
   PlayIcon,
   PrinterIcon,
   RotateCcwIcon,
+  RotateCwIcon,
   Trash2Icon,
   Volume2Icon,
   XIcon,
@@ -81,6 +82,7 @@ import {
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { driveApi } from "@/lib/drive-api";
 import { previewKind } from "@/lib/drive-utils";
 import { cn } from "@/lib/utils";
@@ -423,6 +425,8 @@ function ShareContent({ file, onClose }) {
   const [privateUrl, setPrivateUrl] = useState("");
   const [publicUrl, setPublicUrl] = useState("");
   const [publicShareId, setPublicShareId] = useState("");
+  const [privateExpiry, setPrivateExpiry] = useState("7d");
+  const [privateExpiresAt, setPrivateExpiresAt] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const reduceMotion = useReducedMotion();
@@ -469,8 +473,10 @@ function ShareContent({ file, onClose }) {
   async function generatePrivateLink() {
     setIsGenerating(true);
     try {
-      const result = await driveApi.createShare(file.id, "link");
+      const expiryMinutes = { "1h": 60, "1d": 24 * 60, "7d": 7 * 24 * 60, "30d": 30 * 24 * 60 }[privateExpiry];
+      const result = await driveApi.createShare(file.id, "link", new Date(Date.now() + expiryMinutes * 60_000).toISOString());
       setPrivateUrl(result.share.url || "");
+      setPrivateExpiresAt(result.share.expiresAt || "");
     } catch (error) {
       toast.error("Couldn’t create private link", {
         description: error.message,
@@ -560,7 +566,7 @@ function ShareContent({ file, onClose }) {
             <FieldDescription>
               {visibility === "public"
                 ? "Anyone who has this link can access the file."
-                : "Create a private, revocable link only when you are ready to share."}
+                : "Accessible as long as it hasn't expired."}
             </FieldDescription>
           </Field>
           <AnimatePresence initial={false} mode="wait">
@@ -592,6 +598,7 @@ function ShareContent({ file, onClose }) {
                 className="overflow-hidden"
               >
                 {linkField(privateUrl, "")}
+                <p className="mt-2 text-xs text-muted-foreground">Expires {new Date(privateExpiresAt).toLocaleString()}</p>
               </motion.div>
             ) : (
               <motion.div
@@ -604,20 +611,38 @@ function ShareContent({ file, onClose }) {
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-sm text-muted-foreground">
-                    Create a private link that you can revoke later.
+                    Create a private link that expires.
                   </p>
-                  <Button
-                    type="button"
-                    onClick={generatePrivateLink}
-                    disabled={isGenerating}
-                  >
-                    {isGenerating ? (
-                      <Spinner data-icon="inline-start" />
-                    ) : (
-                      <LinkIcon data-icon="inline-start" />
-                    )}
-                    Create private link
-                  </Button>
+                  <div className="flex w-full items-center">
+                    <div className="flex-1">
+                      <Select value={privateExpiry} onValueChange={setPrivateExpiry}>
+                        <SelectTrigger className="h-9 w-full rounded-r-none border-r-0" aria-label="Private link expiration">
+                          <span>{({ "1h": "1 hour", "1d": "1 day", "7d": "7 days", "30d": "30 days" })[privateExpiry]}</span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="1h">1 hour</SelectItem>
+                            <SelectItem value="1d">1 day</SelectItem>
+                            <SelectItem value="7d">7 days</SelectItem>
+                            <SelectItem value="30d">30 days</SelectItem>
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      className="flex-1 rounded-l-none"
+                      onClick={generatePrivateLink}
+                      disabled={isGenerating}
+                    >
+                      {isGenerating ? (
+                        <Spinner data-icon="inline-start" />
+                      ) : (
+                        <LinkIcon data-icon="inline-start" />
+                      )}
+                      Create private link
+                    </Button>
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -771,16 +796,38 @@ function ImagePreview({ file, url, onReady, onError, onNavigationToneChange }) {
 function AudioPreview({ url, onReady, onError }) {
   const audioRef = useRef(null);
   const seekingRef = useRef(false);
+  const hoverResetTimer = useRef(null);
+  const reduceMotion = useReducedMotion();
   const [playing, setPlaying] = useState(false);
   const [volume, setVolume] = useState(100);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [hoverTime, setHoverTime] = useState(null);
+  const [isHoverTooltipOpen, setIsHoverTooltipOpen] = useState(false);
   const bars = useMemo(() => Array.from({ length: 72 }, (_, index) => 22 + ((Math.sin(index * 1.72) + Math.sin(index * 0.37 + 1.4) + 2) / 4) * 68), []);
-  useEffect(() => () => audioRef.current?.pause(), []);
+  useEffect(() => () => {
+    audioRef.current?.pause();
+    window.clearTimeout(hoverResetTimer.current);
+  }, []);
+  function showHoverTime(next) {
+    window.clearTimeout(hoverResetTimer.current);
+    setHoverTime(next);
+    setIsHoverTooltipOpen(true);
+  }
+  function hideHoverTime() {
+    setIsHoverTooltipOpen(false);
+    window.clearTimeout(hoverResetTimer.current);
+    hoverResetTimer.current = window.setTimeout(() => setHoverTime(null), reduceMotion ? 0 : 160);
+  }
+  function positionFromPointer(event) {
+    if (!duration) return 0;
+    const { left, width } = event.currentTarget.getBoundingClientRect();
+    return Math.min(duration, Math.max(0, ((event.clientX - left) / width) * duration));
+  }
   function seekFromPointer(event) {
     if (!audioRef.current || !duration) return;
-    const { left, width } = event.currentTarget.getBoundingClientRect();
-    const next = Math.min(duration, Math.max(0, ((event.clientX - left) / width) * duration));
+    const next = positionFromPointer(event);
     audioRef.current.currentTime = next;
     setCurrentTime(next);
   }
@@ -816,15 +863,17 @@ function AudioPreview({ url, onReady, onError }) {
           aria-valuemax={duration || 0}
           aria-valuenow={currentTime}
           aria-valuetext={`${timeLabel(currentTime)} of ${timeLabel(duration)}`}
-          className="flex h-28 cursor-pointer touch-none items-center gap-px rounded-xl bg-muted/60 px-3 py-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-36 sm:gap-1 sm:px-5"
+          className="relative flex h-28 cursor-pointer touch-none items-center gap-px rounded-xl bg-muted/60 px-3 py-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-36 sm:gap-1 sm:px-5"
           onPointerDown={(event) => {
             seekingRef.current = true;
             event.currentTarget.setPointerCapture(event.pointerId);
+            showHoverTime(positionFromPointer(event));
             seekFromPointer(event);
           }}
-          onPointerMove={(event) => { if (seekingRef.current) seekFromPointer(event); }}
+          onPointerMove={(event) => { showHoverTime(positionFromPointer(event)); if (seekingRef.current) seekFromPointer(event); }}
+          onPointerLeave={() => { if (!seekingRef.current) hideHoverTime(); }}
           onPointerUp={() => { seekingRef.current = false; }}
-          onPointerCancel={() => { seekingRef.current = false; }}
+          onPointerCancel={() => { seekingRef.current = false; hideHoverTime(); }}
           onKeyDown={(event) => {
             if (!duration) return;
             if (event.key === "ArrowLeft" || event.key === "ArrowDown") { event.preventDefault(); const next = Math.max(0, currentTime - 5); if (audioRef.current) audioRef.current.currentTime = next; setCurrentTime(next); }
@@ -834,24 +883,25 @@ function AudioPreview({ url, onReady, onError }) {
           }}
         >
           {bars.map((height, index) => {
-            const active = index / bars.length <= (duration ? currentTime / duration : 0);
-            return <motion.span key={index} animate={{ height: `${playing ? Math.min(100, height + ((index * 13) % 18)) : height}%` }} transition={{ duration: 0.16 }} className={cn("min-w-px flex-1 rounded-full", active ? "bg-primary" : "bg-border")} />;
+            const played = Math.min(1, Math.max(0, (duration ? currentTime / duration : 0) * bars.length - index));
+            const hovered = Math.min(1, Math.max(0, (duration && hoverTime !== null ? hoverTime / duration : 0) * bars.length - index));
+            return <motion.span key={index} animate={{ height: `${playing ? Math.min(100, height + ((index * 13) % 18)) : height}%` }} transition={{ duration: reduceMotion ? 0 : 0.16 }} className="relative min-w-px flex-1 overflow-hidden rounded-full bg-muted-foreground/20"><motion.span aria-hidden="true" animate={{ opacity: hovered > 0 && played === 0 ? 1 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }} className="absolute inset-0 bg-muted-foreground/35" /><motion.span aria-hidden="true" animate={{ opacity: played > 0 ? 1 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.18, ease: "easeOut" }} className="absolute inset-0 bg-primary" /></motion.span>;
           })}
+          <Tooltip open={isHoverTooltipOpen}>
+            <TooltipTrigger render={<span aria-hidden="true" style={{ left: `${duration ? ((hoverTime || 0) / duration) * 100 : 0}%` }} className="pointer-events-none absolute top-0 bottom-0 w-px" />} />
+            <TooltipContent side="top" sideOffset={10} className="tabular-nums">{timeLabel(hoverTime || 0)}</TooltipContent>
+          </Tooltip>
         </div>
-        <div className="mt-3 flex items-center justify-between text-xs tabular-nums text-muted-foreground">
+        <div className="relative mt-3 flex items-center justify-between text-xs tabular-nums text-muted-foreground">
           <span>{timeLabel(currentTime)}</span>
+          <span className="absolute left-1/2 -translate-x-1/2 rounded-full bg-muted px-2 py-0.5 font-medium text-foreground shadow-xs">{timeLabel(currentTime)}</span>
           <span>{timeLabel(duration)}</span>
         </div>
-        <div className="mt-5 flex items-center justify-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => { if (audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 10); }} aria-label="Back 10 seconds" title="Back 10 seconds">
-            <RotateCcwIcon />
-          </Button>
-          <Button size="icon-lg" onClick={togglePlayback} aria-label={playing ? "Pause audio" : "Play audio"}>
-            {playing ? <PauseIcon /> : <PlayIcon />}
-          </Button>
+        <div className="relative mt-5 flex items-center justify-center gap-2">
+          <div className="absolute left-0">
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="outline" size="icon" aria-label="Adjust volume" title="Adjust volume" />}><Volume2Icon /></DropdownMenuTrigger>
-            <DropdownMenuContent side="right" sideOffset={8} align="center" className="w-52 p-3" onClick={(event) => event.stopPropagation()}>
+            <DropdownMenuContent side="top" sideOffset={8} align="start" className="w-52 p-3" onClick={(event) => event.stopPropagation()}>
               <div className="flex items-center gap-3">
                 <Volume2Icon className="size-4 shrink-0 text-muted-foreground" />
                 <Slider className="flex-1" value={volume} min={0} max={100} step={1} onValueChange={(value) => { if (audioRef.current) { audioRef.current.volume = value / 100; audioRef.current.muted = false; } setVolume(value); }} ariaLabel="Volume" />
@@ -859,6 +909,28 @@ function AudioPreview({ url, onReady, onError }) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
+          <Button variant="outline" size="icon" onClick={() => { if (audioRef.current) audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - 10); }} aria-label="Back 10 seconds" title="Back 10 seconds">
+            <RotateCcwIcon />
+          </Button>
+          <Button size="icon-lg" onClick={togglePlayback} aria-label={playing ? "Pause audio" : "Play audio"}>
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => { if (audioRef.current) audioRef.current.currentTime = Math.min(duration, audioRef.current.currentTime + 10); }} aria-label="Forward 10 seconds" title="Forward 10 seconds">
+            <RotateCwIcon />
+          </Button>
+          <div className="absolute right-0">
+            <Select value={String(playbackRate)} onValueChange={(value) => { const rate = Number(value); if (audioRef.current) audioRef.current.playbackRate = rate; setPlaybackRate(rate); }}>
+              <SelectTrigger className="size-10 justify-center p-0 [&>svg]:hidden" aria-label="Adjust playback speed">
+                <span className="text-xs font-semibold tabular-nums">{playbackRate}×</span>
+              </SelectTrigger>
+              <SelectContent side="top" sideOffset={8} align="end" alignItemWithTrigger={false} className="w-24" onClick={(event) => event.stopPropagation()}>
+                <SelectGroup>
+                  {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => <SelectItem key={rate} value={String(rate)}>{rate}×</SelectItem>)}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
     </div>

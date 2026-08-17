@@ -20,6 +20,7 @@ export type CreateUploadInput = {
   contentType: string | null;
   expectedBytes: number;
   storageKey: string;
+  resumableSessionUri: string;
   expiresAt: Date;
 };
 
@@ -39,9 +40,13 @@ export interface DriveRepository {
   finalizePermanentDelete(ownerId: string, nodes: NodeRecord[]): Promise<void>;
   createUpload(input: CreateUploadInput): Promise<UploadRecord>;
   getUpload(ownerId: string, uploadId: string): Promise<UploadRecord | null>;
+  listOpenUploads(ownerId: string): Promise<UploadRecord[]>;
   markUploadStreaming(ownerId: string, uploadId: string): Promise<UploadRecord>;
+  updateUploadProgress(ownerId: string, uploadId: string, receivedBytes: number): Promise<UploadRecord>;
   completeUpload(ownerId: string, uploadId: string, receivedBytes: number, checksum: string | null, durationSeconds?: number,): Promise<NodeRecord>;
   failUpload(ownerId: string, uploadId: string): Promise<UploadRecord | null>;
+  cancelUpload(ownerId: string, uploadId: string): Promise<UploadRecord | null>;
+  listExpiredUploads(cutoff: Date, limit?: number): Promise<UploadRecord[]>;
   createShare(input: { id: string; nodeId: string; ownerId: string; mode: ShareMode; publicId: string | null; tokenHash: string | null; recipientId: string | null; expiresAt: Date | null }): Promise<ShareRecord>;
   listShares(ownerId: string, nodeId: string): Promise<ShareRecord[]>;
   revokeShare(ownerId: string, shareId: string): Promise<void>;

@@ -68,6 +68,7 @@ function toUpload(snapshot: DocumentSnapshot<DocumentData>): UploadRecord {
     expectedBytes: Number(data.expectedBytes),
     receivedBytes: Number(data.receivedBytes ?? 0),
     storageKey: String(data.storageKey),
+    resumableSessionUri: String(data.resumableSessionUri ?? ""),
     status: data.status,
     expiresAt: toDate(data.expiresAt),
     createdAt: toDate(data.createdAt),
@@ -343,7 +344,7 @@ export class FirestoreDriveRepository implements DriveRepository {
       await this.assertParent(transaction, input.ownerId, input.parentId);
       await this.assertNameAvailable(transaction, input.ownerId, input.parentId, normalizeName(input.name));
       transaction.set(nodeRef, { ownerId: input.ownerId, parentId: input.parentId, kind: "file", status: "uploading", name: input.name, nameNormalized: normalizeName(input.name), storageKey: input.storageKey, legacyStoragePath: null, sizeBytes: 0, contentType: input.contentType, checksum: null, createdAt: now, updatedAt: now, trashedAt: null, isTrashRoot: false });
-      transaction.set(uploadRef, { ownerId: input.ownerId, nodeId: input.nodeId, parentId: input.parentId, name: input.name, contentType: input.contentType, expectedBytes: input.expectedBytes, receivedBytes: 0, storageKey: input.storageKey, status: "pending", expiresAt: input.expiresAt, createdAt: now, updatedAt: now });
+      transaction.set(uploadRef, { ownerId: input.ownerId, nodeId: input.nodeId, parentId: input.parentId, name: input.name, contentType: input.contentType, expectedBytes: input.expectedBytes, receivedBytes: 0, storageKey: input.storageKey, resumableSessionUri: input.resumableSessionUri, status: "pending", expiresAt: input.expiresAt, createdAt: now, updatedAt: now });
       transaction.update(userRef, { storageReservedBytes: user.storageReservedBytes + input.expectedBytes, updatedAt: now });
     });
     return toUpload(await uploadRef.get());
@@ -356,13 +357,31 @@ export class FirestoreDriveRepository implements DriveRepository {
     return upload.ownerId === ownerId ? upload : null;
   }
 
+  async listOpenUploads(ownerId: string) {
+    const snapshot = await this.firestore.collection(UPLOADS).where("ownerId", "==", ownerId).get();
+    return snapshot.docs
+      .map(toUpload)
+      .filter((upload) => ["pending", "streaming"].includes(upload.status) && upload.expiresAt > new Date());
+  }
+
   async markUploadStreaming(ownerId: string, uploadId: string) {
     const ref = this.uploadRef(uploadId);
     await this.firestore.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       const upload = toUpload(snapshot);
-      if (upload.ownerId !== ownerId || upload.status !== "pending" || upload.expiresAt <= new Date()) throw new ApiError(409, "UPLOAD_UNAVAILABLE", "This upload is no longer available.");
+      if (upload.ownerId !== ownerId || !["pending", "streaming"].includes(upload.status) || upload.expiresAt <= new Date()) throw new ApiError(409, "UPLOAD_UNAVAILABLE", "This upload is no longer available.");
       transaction.update(ref, { status: "streaming", updatedAt: new Date() });
+    });
+    return toUpload(await ref.get());
+  }
+
+  async updateUploadProgress(ownerId: string, uploadId: string, receivedBytes: number) {
+    const ref = this.uploadRef(uploadId);
+    await this.firestore.runTransaction(async (transaction) => {
+      const upload = toUpload(await transaction.get(ref));
+      if (upload.ownerId !== ownerId || !["pending", "streaming"].includes(upload.status)) throw new ApiError(409, "UPLOAD_UNAVAILABLE", "This upload is no longer available.");
+      if (!Number.isSafeInteger(receivedBytes) || receivedBytes < upload.receivedBytes || receivedBytes > upload.expectedBytes) throw new ApiError(422, "INVALID_UPLOAD_PROGRESS", "Upload progress is invalid.");
+      transaction.update(ref, { status: "streaming", receivedBytes, updatedAt: new Date() });
     });
     return toUpload(await ref.get());
   }
@@ -447,6 +466,23 @@ export class FirestoreDriveRepository implements DriveRepository {
     return failed;
   }
 
+  async cancelUpload(ownerId: string, uploadId: string) {
+    const uploadRef = this.uploadRef(uploadId);
+    let cancelled: UploadRecord | null = null;
+    await this.firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(uploadRef);
+      if (!snapshot.exists) return;
+      const upload = toUpload(snapshot);
+      if (upload.ownerId !== ownerId || ["completed", "failed", "cancelled"].includes(upload.status)) { cancelled = upload; return; }
+      const user = toUser(await transaction.get(this.userRef(ownerId)));
+      transaction.update(uploadRef, { status: "cancelled", updatedAt: new Date() });
+      transaction.delete(this.nodeRef(upload.nodeId));
+      transaction.update(this.userRef(ownerId), { storageReservedBytes: Math.max(0, user.storageReservedBytes - upload.expectedBytes), updatedAt: new Date() });
+      cancelled = { ...upload, status: "cancelled" };
+    });
+    return cancelled;
+  }
+
   async createShare(input: { id: string; nodeId: string; ownerId: string; mode: ShareRecord["mode"]; publicId: string | null; tokenHash: string | null; recipientId: string | null; expiresAt: Date | null }) {
     const ref = this.shareRef(input.id);
     const now = new Date();
@@ -526,6 +562,16 @@ export class FirestoreDriveRepository implements DriveRepository {
     const hasMore = nodes.length > pageSize;
     const items = hasMore ? nodes.slice(0, pageSize) : nodes;
     return { items, nextCursor: hasMore ? encodeCursor(items.at(-1)!.id) : null };
+  }
+
+  async listExpiredUploads(cutoff: Date, limit = 100) {
+    const snapshot = await this.firestore.collection(UPLOADS)
+      .where("expiresAt", "<=", cutoff)
+      .where("status", "in", ["pending", "streaming"])
+      .orderBy("expiresAt", "asc")
+      .limit(limit)
+      .get();
+    return snapshot.docs.map(toUpload);
   }
 
   async listExpiredTrash(cutoff: Date, limit = 100) {

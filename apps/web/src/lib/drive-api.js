@@ -173,7 +173,10 @@ function normalizeStorage(storage) {
     : null;
 }
 
-function xhrUpload(uploadId, file, onProgress) {
+const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+const UPLOAD_RETRY_LIMIT = 3;
+
+function xhrUploadChunk(uploadId, chunk, start, end, total, onProgress) {
   const xhr = new XMLHttpRequest();
 
   const upload = (async () => {
@@ -185,7 +188,7 @@ function xhrUpload(uploadId, file, onProgress) {
       xhr.open(
         "PUT",
         endpoint(
-          `/v1/uploads/${encodeURIComponent(uploadId)}/content`,
+          `/v1/uploads/${encodeURIComponent(uploadId)}/chunk`,
         ),
         true,
       );
@@ -196,11 +199,7 @@ function xhrUpload(uploadId, file, onProgress) {
         "Content-Type",
         "application/octet-stream",
       );
-
-      xhr.setRequestHeader(
-        "X-Upload-Content-Type",
-        file.type || "application/octet-stream",
-      );
+      xhr.setRequestHeader("Content-Range", `bytes ${start}-${end}/${total}`);
 
       xhr.setRequestHeader(
         "X-CSRF-Token",
@@ -212,7 +211,7 @@ function xhrUpload(uploadId, file, onProgress) {
 
         onProgress?.(
           Math.round(
-            (event.loaded / event.total) * 100,
+            event.loaded,
           ),
         );
       };
@@ -236,7 +235,7 @@ function xhrUpload(uploadId, file, onProgress) {
           xhr.status >= 200 &&
           xhr.status < 300
         ) {
-          resolve(body?.item || body);
+          resolve(body);
         } else {
           reject(
             apiError(
@@ -261,7 +260,7 @@ function xhrUpload(uploadId, file, onProgress) {
         );
       };
 
-      xhr.send(file);
+      xhr.send(chunk);
     });
   })();
 
@@ -269,6 +268,14 @@ function xhrUpload(uploadId, file, onProgress) {
     upload,
     abort: () => xhr.abort(),
   };
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function isRetryableUploadError(error) {
+  return !error?.code || ["INTERNAL_ERROR", "UPLOAD_OFFSET_MISMATCH"].includes(error.code);
 }
 
 export const driveApi = {
@@ -437,13 +444,14 @@ export const driveApi = {
     );
   },
 
-  createShare(nodeId, mode) {
+  createShare(nodeId, mode, expiresAt = null) {
     return request(
       `/v1/nodes/${encodeURIComponent(nodeId)}/shares`,
       {
         method: "POST",
         body: JSON.stringify({
           mode,
+          expiresAt,
         }),
       },
     );
@@ -544,31 +552,42 @@ export const driveApi = {
     );
   },
 
+  cancelUpload(uploadId) {
+    return request(`/v1/uploads/${encodeURIComponent(uploadId)}`, { method: "DELETE" });
+  },
+
+  listOpenUploads() {
+    return request("/v1/uploads");
+  },
+
   upload(
     file,
     parentId = null,
     onProgress,
+    options = {},
   ) {
     let xhrHandle = null;
-    let uploadId = null;
+    let uploadId = options.uploadId || null;
     let cancelled = false;
+    let paused = false;
 
     const upload = (async () => {
-      const intent = await request(
-        "/v1/uploads",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            parentId,
-            name: file.name,
-            contentType:
-              file.type || null,
-            sizeBytes: file.size,
-          }),
-        },
-      );
-
-      uploadId = intent.upload.id;
+      if (!uploadId) {
+        const intent = await request(
+          "/v1/uploads",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              parentId,
+              name: file.name,
+              contentType: file.type || null,
+              sizeBytes: file.size,
+            }),
+          },
+        );
+        uploadId = intent.upload.id;
+        options.onCreated?.(intent.upload);
+      }
 
       if (cancelled) {
         await request(
@@ -583,13 +602,55 @@ export const driveApi = {
         );
       }
 
-      xhrHandle = xhrUpload(
-        uploadId,
-        file,
-        onProgress,
-      );
-
-      return xhrHandle.upload;
+      let receivedBytes = 0;
+      while (receivedBytes < file.size) {
+        if (paused) {
+          const error = new Error("Upload paused.");
+          error.code = "UPLOAD_PAUSED";
+          throw error;
+        }
+        if (cancelled) throw new Error("Upload cancelled.");
+        const status = await request(`/v1/uploads/${encodeURIComponent(uploadId)}`);
+        if (status.upload.status === "completed") return null;
+        if (!["pending", "streaming"].includes(status.upload.status)) throw new Error("This upload is no longer available.");
+        receivedBytes = Number(status.upload.receivedBytes || 0);
+        onProgress?.(Math.round((receivedBytes / file.size) * 100), receivedBytes);
+        const end = Math.min(receivedBytes + UPLOAD_CHUNK_BYTES, file.size) - 1;
+        const chunk = file.slice(receivedBytes, end + 1);
+        let attempts = 0;
+        while (true) {
+          try {
+            if (paused) {
+              const error = new Error("Upload paused.");
+              error.code = "UPLOAD_PAUSED";
+              throw error;
+            }
+            xhrHandle = xhrUploadChunk(uploadId, chunk, receivedBytes, end, file.size, (loaded) => onProgress?.(Math.round(((receivedBytes + loaded) / file.size) * 100), receivedBytes + loaded));
+            const result = await xhrHandle.upload;
+            receivedBytes = Number(result.upload?.receivedBytes ?? end + 1);
+            onProgress?.(Math.round((receivedBytes / file.size) * 100), receivedBytes);
+            if (result.item) return result.item;
+            break;
+          } catch (error) {
+            if (paused) {
+              const pausedError = new Error("Upload paused.");
+              pausedError.code = "UPLOAD_PAUSED";
+              throw pausedError;
+            }
+            if (cancelled) throw error;
+            attempts += 1;
+            if (!isRetryableUploadError(error) || attempts > UPLOAD_RETRY_LIMIT) throw error;
+            const status = await request(`/v1/uploads/${encodeURIComponent(uploadId)}`);
+            const reconciledBytes = Number(status.upload.receivedBytes || 0);
+            if (reconciledBytes !== receivedBytes) {
+              receivedBytes = reconciledBytes;
+              break;
+            }
+            await sleep(250 * 2 ** (attempts - 1));
+          }
+        }
+      }
+      return null;
     })();
 
     return {
@@ -608,6 +669,11 @@ export const driveApi = {
             },
           ).catch(() => undefined);
         }
+      },
+
+      pause: () => {
+        paused = true;
+        xhrHandle?.abort();
       },
     };
   },

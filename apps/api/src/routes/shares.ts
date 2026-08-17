@@ -1,15 +1,11 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
-import { idSchema, parse } from "../contracts.js";
+import { createShareSchema, idSchema, parse } from "../contracts.js";
 import { ApiError } from "../lib/errors.js";
 import { hashToken, id, secretToken } from "../lib/ids.js";
 import { nodeResponse, sendNodeContent } from "../http.js";
 import { requireUser } from "../plugins/auth.js";
-
-const createShareSchema = z.object({ mode: z.enum(["public", "link", "recipient"]), recipientId: idSchema.nullable().optional().default(null), expiresAt: z.string().datetime().nullable().optional().default(null) }).superRefine((value, context) => {
-  if (value.mode === "recipient" && !value.recipientId) context.addIssue({ code: z.ZodIssueCode.custom, message: "A recipient is required for a recipient share." });
-});
 
 function shareResponse(share: { id: string; mode: string; publicId: string | null; recipientId: string | null; expiresAt: Date | null; revokedAt: Date | null }, webOrigin: string, rawToken?: string) {
   const url = share.mode === "public" && share.publicId ? `${webOrigin}/p/${share.publicId}` : share.mode === "link" && rawToken ? `${webOrigin}/s/${rawToken}` : null;

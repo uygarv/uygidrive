@@ -389,6 +389,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [uploadNotice, setUploadNotice] = useState(null);
+  const openUploaderForResume = useCallback(() => setIsUploadOpen(true), []);
 
   useEffect(() => () => window.clearTimeout(uploadNoticeTimer.current), []);
 
@@ -950,6 +951,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         parentId={folderId}
         onComplete={refresh}
         onUploadsChange={updateUploadNotice}
+        onResumeRequired={openUploaderForResume}
       />
       <FolderDialog
         open={isFolderOpen}

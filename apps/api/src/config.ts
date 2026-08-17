@@ -9,7 +9,7 @@ const environmentSchema = z.object({
   FIREBASE_WEB_API_KEY: z.string().min(1),
   LEGACY_SHARE_TOKEN_SECRET: z.string().min(1).optional(),
   DEFAULT_STORAGE_LIMIT_BYTES: z.coerce.number().int().positive().default(2 * 1024 * 1024 * 1024),
-  UPLOAD_INTENT_TTL_MINUTES: z.coerce.number().int().positive().max(24 * 60).default(60),
+  UPLOAD_INTENT_TTL_MINUTES: z.coerce.number().int().positive().max(7 * 24 * 60).default(7 * 24 * 60),
   TRASH_RETENTION_DAYS: z.coerce.number().int().positive().max(365).default(30),
   MAINTENANCE_TOKEN: z.string().min(32).optional(),
 });

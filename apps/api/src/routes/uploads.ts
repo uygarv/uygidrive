@@ -8,6 +8,18 @@ import { nodeResponse } from "../http.js";
 import { requireUser } from "../plugins/auth.js";
 
 const createUploadSchema = z.object({ parentId: nullableIdSchema.optional().default(null), name: z.string().max(255), contentType: z.string().max(255).nullable().optional().default(null), sizeBytes: z.coerce.number().int().min(0).max(100 * 1024 * 1024 * 1024) });
+const contentRangePattern = /^bytes (\d+)-(\d+)\/(\d+)$/;
+
+function parseContentRange(value: string | string[] | undefined) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const match = raw?.match(contentRangePattern);
+  if (!match) throw new ApiError(422, "INVALID_CONTENT_RANGE", "Content-Range must describe a single byte range.");
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const total = Number(match[3]);
+  if (![start, end, total].every(Number.isSafeInteger)) throw new ApiError(422, "INVALID_CONTENT_RANGE", "Content-Range is invalid.");
+  return { start, end, total };
+}
 
 export async function registerUploadRoutes(app: FastifyInstance, context: AppContext) {
   app.post("/v1/uploads", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
@@ -17,14 +29,22 @@ export async function registerUploadRoutes(app: FastifyInstance, context: AppCon
     return reply.code(201).send({ upload: { id: upload.id, nodeId: upload.nodeId, expiresAt: upload.expiresAt.toISOString() } });
   });
 
-  app.put("/v1/uploads/:uploadId/content", { config: { rateLimit: false } }, async (request, reply) => {
+  app.get("/v1/uploads", async (request) => {
+    const user = await requireUser(request, context.firebase.auth);
+    const uploads = await context.drive.listOpenUploads(user.uid);
+    return { uploads: uploads.filter((upload) => ["pending", "streaming"].includes(upload.status)).map((upload) => ({ id: upload.id, parentId: upload.parentId, name: upload.name, contentType: upload.contentType, expectedBytes: upload.expectedBytes, receivedBytes: upload.receivedBytes, status: upload.status, expiresAt: upload.expiresAt.toISOString() })) };
+  });
+
+  app.put("/v1/uploads/:uploadId/chunk", { bodyLimit: 20 * 1024 * 1024, config: { rateLimit: false } }, async (request, reply) => {
     const user = await requireUser(request, context.firebase.auth);
     const { uploadId } = parse(z.object({ uploadId: idSchema }), request.params);
-    const contentType = typeof request.headers["x-upload-content-type"] === "string" ? request.headers["x-upload-content-type"].slice(0, 255) : null;
+    const range = parseContentRange(request.headers["content-range"]);
+    const contentLength = Number(request.headers["content-length"]);
+    if (!Number.isSafeInteger(contentLength) || contentLength !== range.end - range.start + 1) throw new ApiError(422, "INVALID_CHUNK_LENGTH", "Content-Length does not match Content-Range.");
     const source = request.body;
     if (!source || typeof (source as Readable).pipe !== "function") throw new ApiError(415, "INVALID_UPLOAD_BODY", "Upload content must be a binary stream.");
-    const node = await context.drive.receiveUpload(user.uid, uploadId, source as Readable, contentType);
-    return reply.code(201).send({ item: nodeResponse(node) });
+    const result = await context.drive.receiveUploadChunk(user.uid, uploadId, source as Readable, range);
+    return reply.code(result.item ? 201 : 200).send({ upload: { id: result.upload?.id ?? uploadId, status: result.upload?.status, expectedBytes: result.upload?.expectedBytes, receivedBytes: result.upload?.receivedBytes, expiresAt: result.upload?.expiresAt.toISOString() }, item: result.item ? nodeResponse(result.item) : null });
   });
 
   app.get("/v1/uploads/:uploadId", async (request) => {

@@ -16,7 +16,10 @@ export async function registerMaintenanceRoutes(app: FastifyInstance, context: A
     if (!context.config.maintenanceToken || !tokensMatch(token, context.config.maintenanceToken)) {
       throw new ApiError(404, "NOT_FOUND", "The requested resource does not exist.");
     }
-    const result = await context.drive.purgeExpiredTrash(context.config.trashRetentionDays);
-    return { ...result, cutoff: result.cutoff.toISOString() };
+    const [trash, uploads] = await Promise.all([
+      context.drive.purgeExpiredTrash(context.config.trashRetentionDays),
+      context.drive.purgeExpiredUploads(),
+    ]);
+    return { ...trash, cutoff: trash.cutoff.toISOString(), expiredUploads: uploads.candidates };
   });
 }

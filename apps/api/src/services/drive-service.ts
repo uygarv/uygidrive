@@ -3,7 +3,7 @@ import { id } from "../lib/ids.js";
 import { safeFileName } from "../lib/format.js";
 import type { NodeRecord, UploadRecord } from "../types.js";
 import type { DriveRepository, ListNodesInput } from "../repositories/drive-repository.js";
-import { StorageService } from "./storage-service.js";
+import { StorageService, UPLOAD_CHUNK_ALIGNMENT, UPLOAD_CHUNK_BYTES } from "./storage-service.js";
 
 export class DriveService {
   constructor(private readonly repository: DriveRepository, private readonly storage: StorageService, private readonly uploadIntentTtlMinutes: number) {}
@@ -67,7 +67,10 @@ export class DriveService {
     if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes < 0) throw new ApiError(422, "INVALID_SIZE", "File size is invalid.");
     const nodeId = id("fil");
     const uploadId = id("upl");
-    return this.repository.createUpload({
+    const storageKey = `objects/${ownerId}/${nodeId}/original`;
+    const resumableSessionUri = await this.storage.createResumableUpload({ storageKey, contentType: input.contentType, ownerId, nodeId });
+    try {
+      return await this.repository.createUpload({
       id: uploadId,
       ownerId,
       parentId: input.parentId,
@@ -75,24 +78,73 @@ export class DriveService {
       name,
       contentType: input.contentType,
       expectedBytes: input.sizeBytes,
-      storageKey: `objects/${ownerId}/${nodeId}/original`,
+      storageKey,
+      resumableSessionUri,
       expiresAt: new Date(Date.now() + this.uploadIntentTtlMinutes * 60_000),
-    });
-  }
-
-  async receiveUpload(ownerId: string, uploadId: string, source: import("node:stream").Readable, contentType: string | null) {
-    const upload = await this.repository.markUploadStreaming(ownerId, uploadId);
-    try {
-      const result = await this.storage.upload(upload, source, contentType);
-      return this.repository.completeUpload(ownerId, uploadId, result.bytes, result.checksum);
+      });
     } catch (error) {
-      await this.repository.failUpload(ownerId, uploadId);
+      await this.storage.cancelResumableUpload({ resumableSessionUri } as UploadRecord).catch(() => undefined);
       throw error;
     }
   }
 
-  getUpload(ownerId: string, uploadId: string) { return this.repository.getUpload(ownerId, uploadId); }
-  cancelUpload(ownerId: string, uploadId: string) { return this.repository.failUpload(ownerId, uploadId); }
+  async receiveUploadChunk(ownerId: string, uploadId: string, source: import("node:stream").Readable, range: { start: number; end: number; total: number }) {
+    const upload = await this.repository.markUploadStreaming(ownerId, uploadId);
+    if (range.total !== upload.expectedBytes || range.start < 0 || range.end < range.start || range.end >= range.total) throw new ApiError(422, "INVALID_CONTENT_RANGE", "The upload chunk range is invalid.");
+    const chunkBytes = range.end - range.start + 1;
+    const isFinalChunk = range.end === range.total - 1;
+    if (range.start !== upload.receivedBytes) {
+      const progress = await this.storage.getResumableProgress(upload);
+      await this.repository.updateUploadProgress(ownerId, uploadId, progress.receivedBytes);
+      throw new ApiError(409, "UPLOAD_OFFSET_MISMATCH", "The upload position has changed. Resume from the reported receivedBytes.", { receivedBytes: progress.receivedBytes });
+    }
+    if ((!isFinalChunk && (chunkBytes !== UPLOAD_CHUNK_BYTES || chunkBytes % UPLOAD_CHUNK_ALIGNMENT !== 0)) || (isFinalChunk && chunkBytes > UPLOAD_CHUNK_BYTES)) throw new ApiError(422, "INVALID_CHUNK_SIZE", "Upload chunks must be 16 MiB except for the final chunk.");
+    try {
+      const result = await this.storage.uploadChunk(upload, source, range.start, range.end);
+      const updated = await this.repository.updateUploadProgress(ownerId, uploadId, result.receivedBytes);
+      if (!result.complete) return { upload: updated, item: null };
+      const completed = await this.storage.completeResumableUpload(updated);
+      const node = await this.repository.completeUpload(ownerId, uploadId, completed.bytes, completed.checksum, completed.durationSeconds);
+      return { upload: await this.repository.getUpload(ownerId, uploadId), item: node };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getUpload(ownerId: string, uploadId: string) {
+    const upload = await this.repository.getUpload(ownerId, uploadId);
+    if (!upload || !["pending", "streaming"].includes(upload.status)) return upload;
+    const progress = await this.storage.getResumableProgress(upload);
+    if (progress.complete) {
+      const streaming = await this.repository.markUploadStreaming(ownerId, uploadId);
+      const completed = await this.storage.completeResumableUpload(streaming);
+      await this.repository.completeUpload(ownerId, uploadId, completed.bytes, completed.checksum, completed.durationSeconds);
+      return this.repository.getUpload(ownerId, uploadId);
+    }
+    if (progress.receivedBytes !== upload.receivedBytes) return this.repository.updateUploadProgress(ownerId, uploadId, progress.receivedBytes);
+    return upload;
+  }
+
+  async listOpenUploads(ownerId: string) {
+    const uploads = await this.repository.listOpenUploads(ownerId);
+    return Promise.all(uploads.map(async (upload) => (await this.getUpload(ownerId, upload.id)) ?? upload));
+  }
+
+  async cancelUpload(ownerId: string, uploadId: string) {
+    const upload = await this.repository.getUpload(ownerId, uploadId);
+    if (!upload) return null;
+    if (["pending", "streaming"].includes(upload.status)) await this.storage.cancelResumableUpload(upload).catch(() => undefined);
+    return this.repository.cancelUpload(ownerId, uploadId);
+  }
+
+  async purgeExpiredUploads(batchSize = 100) {
+    const candidates = await this.repository.listExpiredUploads(new Date(), batchSize);
+    await Promise.all(candidates.map(async (upload) => {
+      await this.storage.cancelResumableUpload(upload).catch(() => undefined);
+      await this.repository.cancelUpload(upload.ownerId, upload.id);
+    }));
+    return { candidates: candidates.length };
+  }
   getNodeForOwner(ownerId: string, nodeId: string) { return this.repository.getNodeForOwner(ownerId, nodeId, ["active"]); }
   getNode(nodeId: string) { return this.repository.getNode(nodeId); }
   getNodeByLegacyPath(ownerId: string, legacyStoragePath: string) { return this.repository.getNodeByLegacyPath(ownerId, legacyStoragePath); }
