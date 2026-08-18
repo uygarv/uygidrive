@@ -33,6 +33,12 @@ export async function sendNodeContent(request: FastifyRequest, reply: FastifyRep
   if (result.start !== null && result.end !== null) {
     reply.header("content-length", String(result.end - result.start + 1));
     reply.header("content-range", `bytes ${result.start}-${result.end}/${result.size}`);
+  } else {
+    
+
+    // cloud run body size limit is 32mb, using chunked to send large files
+    reply.removeHeader("content-length");
+    reply.header("transfer-encoding", "chunked");
   }
   if (download || !result.inlineSafe) reply.header("content-disposition", attachmentHeader(node.name));
   result.stream.once("error", (error) => request.log.error({ err: error, nodeId: node.id }, "Cloud Storage download stream failed"));

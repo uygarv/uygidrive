@@ -13,6 +13,7 @@ function replyRecorder() {
   const reply = {
     code: () => reply,
     header: (name: string, value: string) => { headers.set(name.toLowerCase(), value); return reply; },
+    removeHeader: (name: string) => { headers.delete(name.toLowerCase()); return reply; },
     send: (payload: unknown) => payload,
   };
   return { reply: reply as unknown as FastifyReply, headers };
@@ -27,6 +28,7 @@ test("streams a full response without Content-Length", async () => {
   const drive = { stream: async () => ({ stream: Readable.from("content"), statusCode: 200, size: node.sizeBytes, contentType: "video/mp4", start: null, end: null, download: true, inlineSafe: true }) } as unknown as DriveService;
   await sendNodeContent(request(), reply, drive, node, true);
   assert.equal(headers.has("content-length"), false);
+  assert.equal(headers.get("transfer-encoding"), "chunked");
   assert.equal(headers.get("accept-ranges"), "bytes");
   assert.match(headers.get("content-disposition") ?? "", /attachment/);
 });

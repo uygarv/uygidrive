@@ -1242,6 +1242,10 @@ function PdfPreview({ file, url, onReady, onError }) {
     setVisiblePage(targetPage);
     viewerRef.current?.querySelector(`[data-page-number="${targetPage}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+  function selectPage(nextPage) {
+    changePage(nextPage);
+    setIsPagesOpen(false);
+  }
   async function printDocument() {
     const response = await fetch(url, { credentials: "include" });
     if (!response.ok) return;
@@ -1250,7 +1254,7 @@ function PdfPreview({ file, url, onReady, onError }) {
     printWindow?.addEventListener("load", () => printWindow.print(), { once: true });
     window.setTimeout(() => URL.revokeObjectURL(printUrl), 60_000);
   }
-  const pages = pdf && pageCount > 0 && <PdfPageList pdf={pdf} pageCount={pageCount} pageNumber={pageNumber} onSelect={changePage} />;
+  const pages = pdf && pageCount > 0 && <PdfPageList pdf={pdf} pageCount={pageCount} pageNumber={pageNumber} onSelect={selectPage} />;
   return (
     <div className="flex size-full min-h-0 overflow-hidden bg-muted/30" onClick={(event) => event.stopPropagation()}>
       <aside className="hidden w-40 shrink-0 border-r bg-background/45 md:flex md:flex-col">
@@ -1258,7 +1262,7 @@ function PdfPreview({ file, url, onReady, onError }) {
         {pages}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-background/45 px-2 py-2 sm:px-3">
+        <div className="sticky top-0 z-20 flex shrink-0 flex-wrap items-center justify-between gap-2 border-b bg-background/90 px-2 py-2 backdrop-blur-sm sm:px-3">
           <div className="flex items-center gap-1">
             <Button className="md:hidden" variant="ghost" size="icon-sm" onClick={() => setIsPagesOpen(true)} aria-label="Open page list"><PanelLeftOpenIcon /></Button>
             <Button variant="ghost" size="icon-sm" onClick={() => changePage(pageNumber - 1)} disabled={pageNumber <= 1} aria-label="Previous page"><ChevronLeftIcon /></Button>
