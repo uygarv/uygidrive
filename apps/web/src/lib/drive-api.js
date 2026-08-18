@@ -85,7 +85,12 @@ async function ensureCsrf() {
   return csrfPromise;
 }
 
-async function request(path, options = {}) {
+async function refreshCsrf() {
+  csrfToken = null;
+  return ensureCsrf();
+}
+
+async function request(path, options = {}, retryCsrf = true) {
   const method = options.method || "GET";
 
   const unsafe = !["GET", "HEAD", "OPTIONS"].includes(
@@ -117,10 +122,18 @@ async function request(path, options = {}) {
   const body = await responseBody(response);
 
   if (!response.ok) {
-    throw apiError(
+    const error = apiError(
       body,
       `Request failed (${response.status})`,
     );
+    // The cookie can expire or be replaced by another tab while this page is
+    // open. A CSRF failure occurs before the route handler, so one retry with
+    // a fresh token cannot repeat a completed mutation.
+    if (unsafe && retryCsrf && error.code === "CSRF_FAILED") {
+      await refreshCsrf();
+      return request(path, options, false);
+    }
+    throw error;
   }
 
   return body;
@@ -461,7 +474,7 @@ export const driveApi = {
     );
   },
 
-  createShare(nodeId, mode, { expiresAt = null, recipientId = null, role = null } = {}) {
+  createShare(nodeId, mode, { expiresAt = null, recipientId = null, role = null, linkTarget = "preview" } = {}) {
     return request(
       `/v1/nodes/${encodeURIComponent(nodeId)}/shares`,
       {
@@ -471,6 +484,7 @@ export const driveApi = {
           expiresAt,
           recipientId,
           role,
+          linkTarget,
         }),
       },
     );
@@ -694,6 +708,7 @@ export const driveApi = {
         const end = Math.min(receivedBytes + UPLOAD_CHUNK_BYTES, file.size) - 1;
         const chunk = file.slice(receivedBytes, end + 1);
         let attempts = 0;
+        let refreshedCsrf = false;
         while (true) {
           try {
             if (paused) {
@@ -714,6 +729,12 @@ export const driveApi = {
               throw pausedError;
             }
             if (cancelled) throw error;
+            if (error?.code === "CSRF_FAILED") {
+              if (refreshedCsrf) throw error;
+              refreshedCsrf = true;
+              await refreshCsrf();
+              continue;
+            }
             attempts += 1;
             if (!isRetryableUploadError(error) || attempts > UPLOAD_RETRY_LIMIT) throw error;
             const status = await request(`/v1/uploads/${encodeURIComponent(uploadId)}`);

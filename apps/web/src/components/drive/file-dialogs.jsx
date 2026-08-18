@@ -425,6 +425,7 @@ export function ShareDialog({ file, currentUserId = null, closing = false, onClo
 function ShareContent({ file, currentUserId, onClose }) {
   const [visibility, setVisibility] = useState(file.accessMode || "private");
   const [linkExpiry, setLinkExpiry] = useState("7d");
+  const [linkTarget, setLinkTarget] = useState("preview");
   const [createdLink, setCreatedLink] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -472,7 +473,7 @@ function ShareContent({ file, currentUserId, onClose }) {
     try {
       const isPublic = linkExpiry === "never";
       const expiryMinutes = { "1h": 60, "1d": 24 * 60, "7d": 7 * 24 * 60, "30d": 30 * 24 * 60 }[linkExpiry];
-      const result = await driveApi.createShare(file.id, isPublic ? "public" : "link", isPublic ? undefined : { expiresAt: new Date(Date.now() + expiryMinutes * 60_000).toISOString() });
+      const result = await driveApi.createShare(file.id, isPublic ? "public" : "link", { expiresAt: isPublic ? null : new Date(Date.now() + expiryMinutes * 60_000).toISOString(), linkTarget: file.type === "file" ? linkTarget : "preview" });
       setCreatedLink(result.share);
     } catch (error) {
       toast.error("Couldn’t create private link", {
@@ -582,8 +583,10 @@ function ShareContent({ file, currentUserId, onClose }) {
             <FieldDescription>{visibility === "public" ? "Choose a public link that never expires or a private expiring link." : "Private links always expire."}</FieldDescription>
             <div className="mt-3 flex w-full items-center">
               <Select value={linkExpiry} onValueChange={setLinkExpiry}><SelectTrigger className="h-9 flex-1 rounded-r-none border-r-0" aria-label="Link expiration"><span>{{ never: "Never expires", "1h": "1 hour", "1d": "1 day", "7d": "7 days", "30d": "30 days" }[linkExpiry]}</span></SelectTrigger><SelectContent><SelectGroup>{visibility === "public" && <SelectItem value="never">Never expires</SelectItem>}<SelectItem value="1h">1 hour</SelectItem><SelectItem value="1d">1 day</SelectItem><SelectItem value="7d">7 days</SelectItem><SelectItem value="30d">30 days</SelectItem></SelectGroup></SelectContent></Select>
+              {file.type === "file" && <Select value={linkTarget} onValueChange={setLinkTarget}><SelectTrigger className="h-9 flex-1 rounded-none border-r-0" aria-label="Link destination"><span>{linkTarget === "content" ? "File content" : "UygiDrive preview"}</span></SelectTrigger><SelectContent><SelectGroup><SelectItem value="preview">UygiDrive preview</SelectItem><SelectItem value="content">File content</SelectItem></SelectGroup></SelectContent></Select>}
               <Button type="button" className="flex-1 rounded-l-none" onClick={createLink} disabled={isGenerating}>{isGenerating ? <Spinner data-icon="inline-start" /> : <LinkIcon data-icon="inline-start" />}Create link</Button>
             </div>
+            {file.type === "file" && <p className="mt-1.5 text-xs text-muted-foreground">{linkTarget === "content" ? "Opens the file directly through a UygiDrive URL." : "Opens the UygiDrive share preview."}</p>}
             {createdLink?.url && <InputGroup className="mt-3"><InputGroupInput value={createdLink.url} readOnly /><InputGroupAddon align="inline-end"><InputGroupButton size="icon-xs" onClick={() => copy(createdLink.url)} aria-label="Copy share link"><CopyIcon /></InputGroupButton></InputGroupAddon></InputGroup>}
           </Field>
           {visibility === "private" && (
@@ -1240,7 +1243,16 @@ function PdfPreview({ file, url, onReady, onError }) {
   function changePage(nextPage) {
     const targetPage = Math.min(pageCount, Math.max(1, nextPage));
     setVisiblePage(targetPage);
-    viewerRef.current?.querySelector(`[data-page-number="${targetPage}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const viewer = viewerRef.current;
+    const target = viewer?.querySelector(`[data-page-number="${targetPage}"]`);
+    if (viewer && target) {
+      // scrollIntoView also scrolls the preview dialog's ancestors, which can
+      // move the toolbar out of view. Limit page navigation to the PDF pane.
+      viewer.scrollTo({
+        top: target.getBoundingClientRect().top - viewer.getBoundingClientRect().top + viewer.scrollTop,
+        behavior: "smooth",
+      });
+    }
   }
   function selectPage(nextPage) {
     changePage(nextPage);
@@ -1280,7 +1292,7 @@ function PdfPreview({ file, url, onReady, onError }) {
         </div>
         <div
           ref={viewerRef}
-          className="min-h-0 flex-1 overflow-auto p-5 sm:p-8"
+          className="min-h-0 flex-1 overflow-auto overscroll-contain p-5 sm:p-8"
         >
           {pdf && <PdfDocumentScroller pdf={pdf} pageCount={pageCount} pageNumber={pageNumber} viewerRef={viewerRef} viewerWidth={viewerWidth} zoom={zoom} onPageChange={setVisiblePage} onError={onError} />}
         </div>
