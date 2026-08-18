@@ -5,7 +5,7 @@ import type { NodeRecord } from "../types.js";
 import type { UploadRecord } from "../types.js";
 import { StorageService } from "./storage-service.js";
 import { DriveService } from "./drive-service.js";
-import { UPLOAD_CHUNK_BYTES } from "./storage-service.js";
+import { LEGACY_UPLOAD_CHUNK_BYTES, UPLOAD_CHUNK_BYTES } from "./storage-service.js";
 import { Readable } from "node:stream";
 
 const now = new Date();
@@ -42,7 +42,7 @@ test("purges only expired trash roots and permanently removes their stored files
   assert.equal(result.deletedItems, 3);
 });
 
-test("forwards an aligned 16 MiB chunk and persists Storage's acknowledged offset", async () => {
+test("forwards an aligned 32 MiB chunk and persists Storage's acknowledged offset", async () => {
   const upload: UploadRecord = {
     id: "upl_123456789012", ownerId: "user", actorId: "user", nodeId: "fil_123456789012", parentId: null,
     name: "video.mp4", contentType: "video/mp4", expectedBytes: UPLOAD_CHUNK_BYTES * 2,
@@ -71,7 +71,28 @@ test("forwards an aligned 16 MiB chunk and persists Storage's acknowledged offse
   assert.equal(result.upload?.receivedBytes, UPLOAD_CHUNK_BYTES);
 });
 
-test("rejects a non-final chunk that is not 16 MiB", async () => {
+test("accepts a legacy 16 MiB chunk while clients roll forward", async () => {
+  const upload: UploadRecord = {
+    id: "upl_legacy123456", ownerId: "user", actorId: "user", nodeId: "fil_legacy123456", parentId: null,
+    name: "video.mp4", contentType: "video/mp4", expectedBytes: UPLOAD_CHUNK_BYTES + LEGACY_UPLOAD_CHUNK_BYTES,
+    receivedBytes: 0, storageKey: "objects/user/file/original", resumableSessionUri: "https://storage.example/session",
+    status: "pending", expiresAt: new Date(Date.now() + 60_000), createdAt: now, updatedAt: now,
+  };
+  const repository = {
+    markUploadStreaming: async () => ({ ...upload, status: "streaming" }),
+    updateUploadProgress: async (_ownerId: string, _uploadId: string, receivedBytes: number) => ({ ...upload, status: "streaming", receivedBytes }),
+  } as unknown as DriveRepository;
+  const storage = { uploadChunk: async () => ({ receivedBytes: LEGACY_UPLOAD_CHUNK_BYTES, complete: false }) } as unknown as StorageService;
+  const drive = new DriveService(repository, storage, 60);
+
+  const result = await drive.receiveUploadChunk("user", upload.id, Readable.from(Buffer.alloc(0)), {
+    start: 0, end: LEGACY_UPLOAD_CHUNK_BYTES - 1, total: upload.expectedBytes,
+  });
+
+  assert.equal(result.upload?.receivedBytes, LEGACY_UPLOAD_CHUNK_BYTES);
+});
+
+test("rejects a non-final chunk that is not 32 MiB", async () => {
   const upload: UploadRecord = {
     id: "upl_abcdefghijkl", ownerId: "user", actorId: "user", nodeId: "fil_abcdefghijkl", parentId: null,
     name: "video.mp4", contentType: "video/mp4", expectedBytes: UPLOAD_CHUNK_BYTES * 2,

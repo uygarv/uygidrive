@@ -20,7 +20,10 @@ export type StreamResult = {
   durationSeconds?: number;
 };
 
-export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+export const UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024;
+// Keep uploads started by already-open clients working during the 16 → 32 MiB
+// rollout. New clients always send UPLOAD_CHUNK_BYTES.
+export const LEGACY_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 export const UPLOAD_CHUNK_ALIGNMENT = 256 * 1024;
 
 type ResumableResponse = { status: number; headers: Record<string, string | string[] | undefined>; data?: unknown };

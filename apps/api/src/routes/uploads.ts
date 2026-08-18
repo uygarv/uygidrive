@@ -6,6 +6,7 @@ import { idSchema, nullableIdSchema, parse } from "../contracts.js";
 import { ApiError } from "../lib/errors.js";
 import { nodeResponse } from "../http.js";
 import { requireUser } from "../plugins/auth.js";
+import { UPLOAD_CHUNK_BYTES } from "../services/storage-service.js";
 
 const createUploadSchema = z.object({ parentId: nullableIdSchema.optional().default(null), name: z.string().max(255), contentType: z.string().max(255).nullable().optional().default(null), sizeBytes: z.coerce.number().int().min(0).max(100 * 1024 * 1024 * 1024) });
 const contentRangePattern = /^bytes (\d+)-(\d+)\/(\d+)$/;
@@ -35,7 +36,8 @@ export async function registerUploadRoutes(app: FastifyInstance, context: AppCon
     return { uploads: uploads.filter((upload) => ["pending", "streaming"].includes(upload.status)).map((upload) => ({ id: upload.id, parentId: upload.parentId, name: upload.name, contentType: upload.contentType, expectedBytes: upload.expectedBytes, receivedBytes: upload.receivedBytes, status: upload.status, expiresAt: upload.expiresAt.toISOString() })) };
   });
 
-  app.put("/v1/uploads/:uploadId/chunk", { bodyLimit: 20 * 1024 * 1024, config: { rateLimit: false } }, async (request, reply) => {
+  // Leave room above the raw 32 MiB body for Fastify's request accounting.
+  app.put("/v1/uploads/:uploadId/chunk", { bodyLimit: UPLOAD_CHUNK_BYTES + 1024 * 1024, config: { rateLimit: false } }, async (request, reply) => {
     const user = await requireUser(request, context.firebase.auth);
     const { uploadId } = parse(z.object({ uploadId: idSchema }), request.params);
     const range = parseContentRange(request.headers["content-range"]);
