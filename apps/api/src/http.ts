@@ -27,11 +27,21 @@ function attachmentHeader(name: string) {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
+function inlineHeader(name: string) {
+  const fallback = name.replaceAll("\\", "_").replaceAll('"', "_").replaceAll("\r", "_").replaceAll("\n", "_");
+  return `inline; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
 export async function sendNodeContent(request: FastifyRequest, reply: FastifyReply, drive: DriveService, node: NodeRecord, download = false) {
   const result = await drive.stream(node, { range: request.headers.range, download });
 
   reply.hijack();
   const response = reply.raw;
+  // `reply.hijack()` bypasses Fastify's normal send path. Copy queued headers
+  // first so global headers such as CORS are retained on streamed responses.
+  for (const [name, value] of Object.entries(reply.getHeaders())) {
+    if (value !== undefined) response.setHeader(name, value);
+  }
   response.statusCode = result.statusCode;
   response.setHeader("accept-ranges", "bytes");
   response.setHeader("content-type", result.contentType);
@@ -45,7 +55,7 @@ export async function sendNodeContent(request: FastifyRequest, reply: FastifyRep
     // response and avoid Cloud Run's HTTP/1 full-response size limit.
     if (request.raw.httpVersionMajor !== 2) response.setHeader("transfer-encoding", "chunked");
   }
-  if (download || !result.inlineSafe) response.setHeader("content-disposition", attachmentHeader(node.name));
+  response.setHeader("content-disposition", download || !result.inlineSafe ? attachmentHeader(node.name) : inlineHeader(node.name));
 
   const destroySource = () => {
     if (!result.stream.destroyed) result.stream.destroy();

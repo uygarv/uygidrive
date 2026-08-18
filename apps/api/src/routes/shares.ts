@@ -18,9 +18,10 @@ async function isWithinShare(context: AppContext, nodeId: string, rootId: string
   return false;
 }
 
-function shareResponse(share: { id: string; mode: string; publicId: string | null; recipientId: string | null; role: "viewer" | "editor" | null; expiresAt: Date | null; revokedAt: Date | null }, webOrigin: string, rawToken?: string) {
-  const url = share.mode === "public" && share.publicId ? `${webOrigin}/p/${share.publicId}` : share.mode === "link" && rawToken ? `${webOrigin}/s/${rawToken}` : null;
-  return { id: share.id, mode: share.mode, recipientId: share.recipientId, role: share.role, expiresAt: share.expiresAt?.toISOString() ?? null, revokedAt: share.revokedAt?.toISOString() ?? null, url };
+function shareResponse(share: { id: string; mode: string; linkTarget: "preview" | "content"; publicId: string | null; recipientId: string | null; role: "viewer" | "editor" | null; expiresAt: Date | null; revokedAt: Date | null }, webOrigin: string, rawToken?: string) {
+  const suffix = share.linkTarget === "content" ? "/content" : "";
+  const url = share.mode === "public" && share.publicId ? `${webOrigin}/p/${share.publicId}${suffix}` : share.mode === "link" && rawToken ? `${webOrigin}/s/${rawToken}${suffix}` : null;
+  return { id: share.id, mode: share.mode, linkTarget: share.linkTarget, recipientId: share.recipientId, role: share.role, expiresAt: share.expiresAt?.toISOString() ?? null, revokedAt: share.revokedAt?.toISOString() ?? null, url };
 }
 
 export async function registerShareRoutes(app: FastifyInstance, context: AppContext) {
@@ -41,7 +42,7 @@ export async function registerShareRoutes(app: FastifyInstance, context: AppCont
     const publicId = body.mode === "public" ? id("pub") : null;
     const rawToken = body.mode === "link" ? secretToken() : undefined;
     const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
-    const share = await context.drive.createShare({ id: id("shr"), nodeId, ownerId: user.uid, mode: body.mode, publicId, tokenHash: rawToken ? hashToken(rawToken) : null, recipientId: body.recipientId ?? null, role: body.role ?? null, expiresAt });
+    const share = await context.drive.createShare({ id: id("shr"), nodeId, ownerId: user.uid, mode: body.mode, linkTarget: body.linkTarget ?? "preview", publicId, tokenHash: rawToken ? hashToken(rawToken) : null, recipientId: body.recipientId ?? null, role: body.role ?? null, expiresAt });
     return reply.code(201).send({ share: shareResponse(share, context.config.webOrigins[0]!, rawToken) });
   });
 

@@ -20,8 +20,8 @@ const config: AppConfig = {
   enableHttp2: false,
 };
 
-async function testApp() {
-  return buildApp({ config, firebase: { auth: {}, firestore: {}, bucket: {} } as FirebaseServices, repository: {} as DriveRepository });
+async function testApp(overrides: Partial<AppConfig> = {}) {
+  return buildApp({ config: { ...config, ...overrides }, firebase: { auth: {}, firestore: {}, bucket: {} } as FirebaseServices, repository: {} as DriveRepository });
 }
 
 test("serves health and issues a CSRF token without Firebase access", async (context) => {
@@ -43,4 +43,15 @@ test("rejects protected API calls without a session", async (context) => {
   const response = await app.inject({ method: "GET", url: "/v1/nodes" });
   assert.equal(response.statusCode, 401);
   assert.equal(response.json().error.code, "UNAUTHENTICATED");
+});
+
+test("reflects arbitrary origins only during local development", async (context) => {
+  const app = await testApp({ environment: "development" });
+  context.after(() => app.close());
+  const origin = "http://192.168.68.118:3000";
+
+  const response = await app.inject({ method: "GET", url: "/healthz", headers: { origin } });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["access-control-allow-origin"], origin);
 });

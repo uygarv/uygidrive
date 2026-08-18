@@ -56,6 +56,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Content-Range", "X-CSRF-Token", "X-Upload-Content-Type", "Range"],
     origin(origin, callback) {
+      // Local development commonly uses a LAN address, whose host changes
+      // between networks. Reflect it here; deployed environments stay
+      // restricted to WEB_ORIGIN.
+      if (context.config.environment === "development") {
+        callback(null, true);
+        return;
+      }
       if (!origin || context.config.webOrigins.includes(origin)) callback(null, true);
       else callback(new Error("Origin is not allowed by CORS."), false);
     },

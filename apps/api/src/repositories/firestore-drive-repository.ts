@@ -92,6 +92,7 @@ function toShare(snapshot: DocumentSnapshot<DocumentData>): ShareRecord {
     nodeId: String(data.nodeId),
     ownerId: String(data.ownerId),
     mode: data.mode,
+    linkTarget: data.linkTarget === "content" ? "content" : "preview",
     publicId: data.publicId ? String(data.publicId) : null,
     tokenHash: data.tokenHash ? String(data.tokenHash) : null,
     recipientId: data.recipientId ? String(data.recipientId) : null,
@@ -553,7 +554,7 @@ export class FirestoreDriveRepository implements DriveRepository {
     return cancelled;
   }
 
-  async createShare(input: { id: string; nodeId: string; ownerId: string; mode: ShareRecord["mode"]; publicId: string | null; tokenHash: string | null; recipientId: string | null; role: ShareRecord["role"]; expiresAt: Date | null }) {
+  async createShare(input: { id: string; nodeId: string; ownerId: string; mode: ShareRecord["mode"]; linkTarget: ShareRecord["linkTarget"]; publicId: string | null; tokenHash: string | null; recipientId: string | null; role: ShareRecord["role"]; expiresAt: Date | null }) {
     const ref = this.shareRef(input.id);
     const now = new Date();
     await this.firestore.runTransaction(async (transaction) => {
@@ -562,6 +563,7 @@ export class FirestoreDriveRepository implements DriveRepository {
       const data = node.data()!;
       if (input.mode === "public" && data.accessMode !== "public") throw new ApiError(409, "PUBLIC_ACCESS_REQUIRED", "Set the item to Public before creating a public link.");
       if (input.mode === "recipient" && data.accessMode !== "private") throw new ApiError(409, "PRIVATE_ACCESS_REQUIRED", "Set the item to Private before sharing it with people.");
+      if (input.linkTarget === "content" && data.kind !== "file") throw new ApiError(422, "CONTENT_LINK_FILE_REQUIRED", "File-content links are available only for files.");
       if (input.mode === "recipient" && input.role === "editor" && data.kind !== "folder") throw new ApiError(422, "EDITOR_FOLDER_REQUIRED", "Editor access is available only for folders.");
       transaction.set(ref, { ...input, revokedAt: null, createdAt: now, updatedAt: now });
     });

@@ -1,6 +1,7 @@
 export type NodeKind = "file" | "folder";
 export type NodeStatus = "active" | "uploading" | "trashed";
 export type ShareMode = "public" | "link" | "recipient";
+export type ShareLinkTarget = "preview" | "content";
 export type AccessMode = "public" | "private";
 export type ShareRole = "viewer" | "editor";
 
@@ -44,6 +45,7 @@ export type ShareRecord = {
   nodeId: string;
   ownerId: string;
   mode: ShareMode;
+  linkTarget: ShareLinkTarget;
   publicId: string | null;
   tokenHash: string | null;
   recipientId: string | null;
