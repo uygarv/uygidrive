@@ -26,6 +26,13 @@ export function previewKind(name) {
   return "download";
 }
 
+export function trashDaysRemaining(trashedAt, retentionDays = 30, now = Date.now()) {
+  const deletedAt = new Date(trashedAt).getTime();
+  if (!Number.isFinite(deletedAt) || !Number.isFinite(now)) return null;
+  const millisecondsRemaining = deletedAt + retentionDays * 24 * 60 * 60 * 1_000 - now;
+  return Math.max(0, Math.ceil(millisecondsRemaining / (24 * 60 * 60 * 1_000)));
+}
+
 export function errorMessage(error, fallback = "Something went wrong. Please try again.") {
   return error instanceof Error && error.message ? error.message : fallback;
 }

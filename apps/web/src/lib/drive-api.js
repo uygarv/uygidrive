@@ -367,6 +367,10 @@ export const driveApi = {
     };
   },
 
+  emptyTrash() {
+    return request("/v1/trash", { method: "DELETE" });
+  },
+
   async listShared() {
     const result = await request("/v1/shared");
     return { files: (result.items || []).map(normalizeFile), nextCursor: result.nextCursor || null };

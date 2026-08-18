@@ -7,6 +7,10 @@ export const idSchema = z.string().regex(/^[a-z]+_[A-Za-z0-9_-]{12,}$/);
 export const nullableIdSchema = idSchema.nullable();
 export const sortSchema = z.enum(["date:new-first", "date:old-first", "size:largest-first", "size:smallest-first"]).default("date:new-first");
 export const pageSizeSchema = z.coerce.number().int().min(1).max(100).default(25);
+export const trashQuerySchema = z.object({
+  cursor: z.string().max(2048).optional(),
+  pageSize: pageSizeSchema,
+});
 export const shareModeSchema = z.enum(["public", "link", "recipient"]);
 export const shareLinkTargetSchema = z.enum(["preview", "content"]);
 export const accessModeSchema = z.enum(["public", "private"]);

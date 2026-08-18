@@ -414,6 +414,40 @@ export function DeleteDialog({ file, onClose, onDelete, permanent = false }) {
   );
 }
 
+export function EmptyTrashDialog({ open, onClose, onEmpty }) {
+  const [isPending, setIsPending] = useState(false);
+  async function confirm() {
+    setIsPending(true);
+    try {
+      await onEmpty();
+      onClose();
+    } finally {
+      setIsPending(false);
+    }
+  }
+  return (
+    <AlertDialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogMedia className="bg-destructive/10 text-destructive">
+            <Trash2Icon />
+          </AlertDialogMedia>
+          <AlertDialogTitle>Delete all items in Trash?</AlertDialogTitle>
+          <AlertDialogDescription>
+            All items in Trash will be permanently deleted. This can’t be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={onClose}>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={confirm} disabled={isPending}>
+            {isPending && <Spinner data-icon="inline-start" />}Delete all
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function ShareDialog({ file, currentUserId = null, closing = false, onClose }) {
   return (
     <Dialog open={Boolean(file) && !closing} onOpenChange={(nextOpen) => !nextOpen && onClose()}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { FileUpIcon, PauseIcon, PlayIcon, Trash2Icon, UploadCloudIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,10 +34,11 @@ function savedUploads() {
   }
 }
 
-export function UploadDialog({ open, onOpenChange, parentId, onComplete, onUploadsChange, onResumeRequired }) {
+export const UploadDialog = forwardRef(function UploadDialog({ open, onOpenChange, parentId, onComplete, onUploadsChange, onResumeRequired }, ref) {
   const inputRef = useRef(null);
   const uploadHandles = useRef(new Map());
   const cancelledUploads = useRef(new Set());
+  const queueFilesRef = useRef(null);
   const [queueLoaded, setQueueLoaded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [uploads, setUploads] = useState([]);
@@ -97,6 +98,11 @@ export function UploadDialog({ open, onOpenChange, parentId, onComplete, onUploa
     setUploads((current) => [...current, ...queued]);
     queued.forEach(({ id, file }) => startUpload(id, file));
   }
+
+  queueFilesRef.current = queueFiles;
+  useImperativeHandle(ref, () => ({
+    queueFiles: (fileList) => queueFilesRef.current?.(fileList),
+  }), []);
 
   function startUpload(id, file) {
       const existing = uploads.find((item) => item.id === id);
@@ -180,7 +186,7 @@ export function UploadDialog({ open, onOpenChange, parentId, onComplete, onUploa
 
   return <><Dialog open={open} onOpenChange={handleOpenChange}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle>Upload files</DialogTitle><DialogDescription>Drop files here or choose them from your device. Uploads continue while this dialog is open.</DialogDescription></DialogHeader>
     <input ref={inputRef} className="sr-only" type="file" multiple onClick={(event) => { event.currentTarget.value = ""; }} onChange={(event) => queueFiles(event.target.files)} />
-    <button type="button" onClick={() => inputRef.current?.click()} onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(event) => { event.preventDefault(); setIsDragging(false); queueFiles(event.dataTransfer.files); }} className={cn("flex min-h-48 w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed p-6 text-center outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50", isDragging ? "border-primary bg-primary/5" : "bg-muted/30 hover:bg-muted/60")}>
+    <button type="button" data-upload-drop-zone onClick={() => inputRef.current?.click()} onDragEnter={(event) => { event.preventDefault(); event.stopPropagation(); setIsDragging(true); }} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setIsDragging(true); }} onDragLeave={(event) => { event.stopPropagation(); setIsDragging(false); }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setIsDragging(false); queueFiles(event.dataTransfer.files); }} className={cn("flex min-h-48 w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed p-6 text-center outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50", isDragging ? "border-primary bg-primary/5" : "bg-muted/30 hover:bg-muted/60")}>
       <span className="flex size-10 items-center justify-center rounded-lg bg-background shadow-xs"><UploadCloudIcon className="size-5 text-primary" /></span><span className="text-sm font-medium">Drop files to upload</span><span className="text-sm text-muted-foreground">or select files from your device</span><span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary"><FileUpIcon className="size-4" />Choose files</span>
     </button>
     <AnimatePresence initial={false}>{uploads.length > 0 && <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18 }} className="flex max-h-52 flex-col gap-3 overflow-y-auto pr-1">
@@ -189,4 +195,4 @@ export function UploadDialog({ open, onOpenChange, parentId, onComplete, onUploa
     <div className="flex justify-end"><Button variant="outline" onClick={() => handleOpenChange(false)}><XIcon data-icon="inline-start" />Done</Button></div>
   </DialogContent></Dialog>
   <Dialog open={isResumeOpen} onOpenChange={setIsResumeOpen}><DialogContent><DialogHeader><DialogTitle>Resume upload</DialogTitle><DialogDescription>Reselect the original file. Its name and byte size must match before the upload can continue.</DialogDescription></DialogHeader>{resumeItem && <div className="space-y-3"><div className="rounded-lg border bg-muted/30 p-3 text-sm"><p className="font-medium">{resumeItem.name}</p><p className="text-muted-foreground">Expected size: {resumeItem.sizeBytes.toLocaleString()} bytes</p>{resumeItem.lastModified !== null && <p className="text-muted-foreground">Original modified date will also be checked.</p>}</div><Input type="file" onChange={(event) => setResumeFile(event.target.files?.[0] || null)} /><p className={resumeFile && !selectedFileMatches ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>{resumeFile ? selectedFileMatches ? `Selected file size matches. Ready to resume.` : `Selected file is ${resumeFile.size.toLocaleString()} bytes. This does not match the expected file.` : "Select the original file to resume uploading."}</p></div>}<DialogFooter><Button variant="outline" onClick={() => setIsResumeOpen(false)}>Cancel</Button><Button disabled={!selectedFileMatches} onClick={resumeSelected}><PlayIcon data-icon="inline-start" />Resume upload</Button></DialogFooter></DialogContent></Dialog></>;
-}
+});

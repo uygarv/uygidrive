@@ -42,6 +42,32 @@ test("purges only expired trash roots and permanently removes their stored files
   assert.equal(result.deletedItems, 3);
 });
 
+test("empties every page of Trash and permanently removes stored files", async () => {
+  const permanentlyDeleted: string[] = [];
+  const removedStorage: string[] = [];
+  let calls = 0;
+  const repository = {
+    listTrash: async () => ({ items: calls++ === 0 ? [folder, file] : [], nextCursor: null }),
+    permanentlyDeleteNodes: async (_ownerId: string, nodeId: string) => {
+      permanentlyDeleted.push(nodeId);
+      return nodeId === folder.id ? [folder, child] : [file];
+    },
+    finalizePermanentDelete: async () => undefined,
+  } as unknown as DriveRepository;
+  const storage = {
+    delete: async (node: NodeRecord) => {
+      removedStorage.push(node.id);
+    },
+  } as unknown as StorageService;
+  const drive = new DriveService(repository, storage, 60);
+
+  const result = await drive.emptyTrash("user");
+
+  assert.deepEqual(permanentlyDeleted, [folder.id, file.id]);
+  assert.deepEqual(removedStorage, [child.id, file.id]);
+  assert.equal(result.deletedItems, 3);
+});
+
 test("forwards an aligned 32 MiB chunk and persists Storage's acknowledged offset", async () => {
   const upload: UploadRecord = {
     id: "upl_123456789012", ownerId: "user", actorId: "user", nodeId: "fil_123456789012", parentId: null,

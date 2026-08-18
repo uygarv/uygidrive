@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { driveApi } from "@/lib/drive-api";
+import { trashDaysRemaining } from "@/lib/drive-utils";
 import { IdentityAvatar } from "@/components/identity-avatar";
 
 const thumbnailContentTypes = new Set([
@@ -419,6 +420,7 @@ export function FileBrowser({
           const isDropTarget = dropTargetId === file.id;
           const duration = durationLabel(file.durationSeconds);
           const collaborator = file.uploadedBy?.username ? file.uploadedBy : file.owner?.username ? file.owner : null;
+          const daysRemaining = isTrash ? trashDaysRemaining(file.trashedAt) : null;
 
           return (
           <motion.article
@@ -522,6 +524,7 @@ export function FileBrowser({
                     </>
                   )}
                   {file.isShared && <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none", view === "grid" ? "border-white/20 bg-black/35 text-white shadow-sm backdrop-blur-sm" : "text-primary")}>Shared</Badge>}
+                  {daysRemaining !== null && <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none", view === "grid" ? "border-white/20 bg-black/35 text-white shadow-sm backdrop-blur-sm" : "border-destructive/30 text-destructive")}>{daysRemaining === 0 ? "Deletes today" : `${daysRemaining} day${daysRemaining === 1 ? "" : "s"} left`}</Badge>}
                   {collaborator && <Badge variant="outline" className={cn("h-4 px-1.5 text-[10px] font-medium leading-none sm:hidden", view === "grid" ? "border-white/20 bg-black/30 text-white backdrop-blur-sm" : "text-muted-foreground")}>@{collaborator.username}</Badge>}
                 </span>
               </span>

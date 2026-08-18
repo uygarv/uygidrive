@@ -81,6 +81,7 @@ import { ThemeMenu } from "@/components/theme-menu";
 import { FileBrowser } from "@/components/drive/file-browser";
 import {
   DeleteDialog,
+  EmptyTrashDialog,
   FolderDialog,
   MoveDialog,
   PreviewDialog,
@@ -406,6 +407,8 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const uploadNoticeTimer = useRef(null);
   const shareCloseTimer = useRef(null);
   const navigationTimer = useRef(null);
+  const dropDepth = useRef(0);
+  const uploadDialogRef = useRef(null);
   const [folderId, setFolderId] = useState(null);
   const [sharedRole, setSharedRole] = useState(null);
   const [activeSection, setActiveSection] = useState(initialSection);
@@ -416,12 +419,14 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const [view, setView] = useState("list");
   const [pagination, setPagination] = useState({ page: 0, cursors: [null] });
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isFileDropActive, setIsFileDropActive] = useState(false);
   const [isFolderOpen, setIsFolderOpen] = useState(false);
   const [renameFile, setRenameFile] = useState(null);
   const [moveFile, setMoveFile] = useState(null);
   const [draggedFile, setDraggedFile] = useState(null);
   const [breadcrumbDropId, setBreadcrumbDropId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isEmptyTrashOpen, setIsEmptyTrashOpen] = useState(false);
   const [shareFile, setShareFile] = useState(null);
   const [isShareClosing, setIsShareClosing] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
@@ -624,6 +629,16 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     onError: (error) =>
       toast.error("Couldn’t restore item", { description: errorMessage(error) }),
   });
+  const emptyTrash = useMutation({
+    mutationFn: () => driveApi.emptyTrash(),
+    onSuccess: (result) => {
+      resetPagination();
+      refresh();
+      toast.success(result.deletedItems ? "Trash emptied" : "Trash is already empty");
+    },
+    onError: (error) =>
+      toast.error("Couldn’t empty Trash", { description: errorMessage(error) }),
+  });
 
   function changeSort(nextSort) {
     setSort(nextSort);
@@ -633,7 +648,10 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     if (isTrash) return;
     if (file.type === "folder") {
       setFolderId(file.id);
-      setBreadcrumbs((current) => [...current, file]);
+      setBreadcrumbs((current) => {
+        const existingIndex = current.findIndex((crumb) => crumb.id === file.id);
+        return existingIndex === -1 ? [...current, file] : current.slice(0, existingIndex + 1);
+      });
       if (isShared) setSharedRole(file.sharedRole || sharedRole || "viewer");
       setSearch("");
       setDebouncedSearch("");
@@ -730,8 +748,48 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         file.name.toLocaleLowerCase().includes(debouncedSearch.toLocaleLowerCase()),
       )
     : filesQuery.data?.files || [];
+  function hasDroppedFiles(event) {
+    return Array.from(event.dataTransfer?.types || []).includes("Files");
+  }
+  function isUploadDialogDrop(event) {
+    return event.target instanceof Element && Boolean(event.target.closest("[data-upload-drop-zone]"));
+  }
+  function handleFileDragEnter(event) {
+    if (isUploadDialogDrop(event)) {
+      dropDepth.current = 0;
+      setIsFileDropActive(false);
+      return;
+    }
+    if (!canManageCurrentFolder || !hasDroppedFiles(event)) return;
+    event.preventDefault();
+    dropDepth.current += 1;
+    setIsFileDropActive(true);
+  }
+  function handleFileDragOver(event) {
+    if (isUploadDialogDrop(event)) return;
+    if (!canManageCurrentFolder || !hasDroppedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+  function handleFileDragLeave(event) {
+    if (isUploadDialogDrop(event)) return;
+    if (!isFileDropActive || !hasDroppedFiles(event)) return;
+    dropDepth.current = Math.max(0, dropDepth.current - 1);
+    if (!dropDepth.current) setIsFileDropActive(false);
+  }
+  function handleFileDrop(event) {
+    if (isUploadDialogDrop(event)) return;
+    if (!canManageCurrentFolder || !hasDroppedFiles(event)) return;
+    event.preventDefault();
+    dropDepth.current = 0;
+    setIsFileDropActive(false);
+    const nextFiles = Array.from(event.dataTransfer.files || []);
+    if (!nextFiles.length) return;
+    uploadDialogRef.current?.queueFiles(nextFiles);
+    setIsUploadOpen(true);
+  }
   return (
-    <div className="min-h-svh bg-background md:flex">
+    <div className="min-h-svh bg-background md:flex" onDragEnter={handleFileDragEnter} onDragOver={handleFileDragOver} onDragLeave={handleFileDragLeave} onDrop={handleFileDrop}>
       <UsernameCompletionDialog open={Boolean(sessionQuery.data?.user?.needsUsername)} onCompleted={() => {
         queryClient.invalidateQueries({ queryKey: ["auth-session"] });
         queryClient.invalidateQueries({ queryKey: ["profile"] });
@@ -830,7 +888,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                           ...(index > 0
                             ? [
                                 <BreadcrumbSeparator
-                                  key={`${crumb.id}-separator`}
+                                  key={`${crumb.id}-${index}-separator`}
                                   className="size-12 self-center justify-center [&>svg]:size-6"
                                   render={
                                     <motion.li
@@ -852,7 +910,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                               ]
                             : []),
                           <BreadcrumbItem
-                            key={crumb.id}
+                            key={`${crumb.id}-${index}`}
                             className="h-12 self-center"
                             render={
                               <motion.li
@@ -909,7 +967,16 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                   </AnimatePresence>
                 </div>
               </div>
-              {canManageCurrentFolder && <div className="flex flex-wrap gap-2">
+              {(canManageCurrentFolder || isTrash) && <div className="flex flex-wrap gap-2">
+                {isTrash && <Button
+                  variant="destructive"
+                  onClick={() => setIsEmptyTrashOpen(true)}
+                  disabled={filesQuery.isLoading || (filesQuery.data?.files?.length || 0) === 0}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                  Delete all
+                </Button>}
+                {canManageCurrentFolder && <>
                 <Button
                   className="sm:hidden"
                   onClick={() => setIsUploadOpen(true)}
@@ -940,6 +1007,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                   <FolderPlusIcon data-icon="inline-start" />
                   New folder
                 </Button>
+                </>}
               </div>}
             </div>
           </motion.div>
@@ -1033,6 +1101,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         </main>
       </div>
       <UploadDialog
+        ref={uploadDialogRef}
         open={isUploadOpen}
         onOpenChange={setIsUploadOpen}
         parentId={folderId}
@@ -1040,6 +1109,24 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         onUploadsChange={updateUploadNotice}
         onResumeRequired={openUploaderForResume}
       />
+      <AnimatePresence>
+        {isFileDropActive && (
+          <motion.div
+            className="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/10 p-6 backdrop-blur-sm"
+            initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.99 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.99 }}
+            transition={{ duration: reduceMotion ? 0 : 0.14 }}
+            aria-hidden="true"
+          >
+            <div className="flex flex-col items-center gap-3 rounded-xl border bg-background/95 px-6 py-5 text-center shadow-lg">
+              <span className="flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground"><UploadIcon className="size-6" /></span>
+              <span className="text-sm font-semibold">Drop files to upload</span>
+              <span className="text-xs text-muted-foreground">They’ll be added to this folder and start uploading.</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <FolderDialog
         open={isFolderOpen}
         onOpenChange={setIsFolderOpen}
@@ -1061,6 +1148,11 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         permanent={Boolean(deleteTarget?.permanent)}
         onClose={() => setDeleteTarget(null)}
         onDelete={(file) => remove.mutateAsync({ file, permanent: Boolean(deleteTarget?.permanent) })}
+      />
+      <EmptyTrashDialog
+        open={isEmptyTrashOpen}
+        onClose={() => setIsEmptyTrashOpen(false)}
+        onEmpty={() => emptyTrash.mutateAsync()}
       />
       <ShareDialog file={shareFile} currentUserId={sessionQuery.data?.user?.id} closing={isShareClosing} onClose={closeShare} />
       <PreviewDialog

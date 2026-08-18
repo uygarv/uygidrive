@@ -73,6 +73,22 @@ export class DriveService {
   async deleteAvatar(ownerId: string) { await this.storage.deleteAvatar(ownerId); return this.repository.setAvatarVersion(ownerId, null); }
   streamAvatar(userId: string) { return this.storage.streamAvatar(userId); }
 
+  async emptyTrash(ownerId: string) {
+    let deletedItems = 0;
+    while (true) {
+      // Always refetch the first page: deleting it invalidates pagination cursors.
+      const page = await this.repository.listTrash(ownerId, null, 100);
+      if (!page.items.length) break;
+      for (const root of page.items) {
+        const nodes = await this.repository.permanentlyDeleteNodes(ownerId, root.id);
+        await Promise.all(nodes.filter((node) => node.kind === "file").map((node) => this.storage.delete(node)));
+        await this.repository.finalizePermanentDelete(ownerId, nodes);
+        deletedItems += nodes.length;
+      }
+    }
+    return { deletedItems };
+  }
+
   async purgeExpiredTrash(retentionDays: number, batchSize = 100) {
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1_000);
     const candidates = await this.repository.listExpiredTrash(cutoff, batchSize);

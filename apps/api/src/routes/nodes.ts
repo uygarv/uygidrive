@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { AppContext } from "../app.js";
-import { accessModeSchema, idSchema, nullableIdSchema, pageSizeSchema, parse, sortSchema } from "../contracts.js";
+import { accessModeSchema, idSchema, nullableIdSchema, pageSizeSchema, parse, sortSchema, trashQuerySchema } from "../contracts.js";
 import { ApiError } from "../lib/errors.js";
 import { formatBytes } from "../lib/format.js";
 import { nodeResponse, sendNodeContent, userIdentityResponse } from "../http.js";
@@ -161,8 +161,13 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
 
   app.get("/v1/trash", async (request) => {
     const user = await requireUser(request, context.firebase.auth);
-    const query = parse(z.object({ cursor: z.string().max(2048).optional(), pageSize: pageSizeSchema }), request.query);
+    const query = parse(trashQuerySchema, request.query);
     const page = await context.drive.listTrash(user.uid, query.cursor, query.pageSize);
     return { items: page.items.map(nodeResponse), nextCursor: page.nextCursor };
+  });
+
+  app.delete("/v1/trash", async (request) => {
+    const user = await requireUser(request, context.firebase.auth);
+    return context.drive.emptyTrash(user.uid);
   });
 }
