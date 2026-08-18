@@ -29,18 +29,34 @@ function attachmentHeader(name: string) {
 
 export async function sendNodeContent(request: FastifyRequest, reply: FastifyReply, drive: DriveService, node: NodeRecord, download = false) {
   const result = await drive.stream(node, { range: request.headers.range, download });
-  reply.code(result.statusCode).header("accept-ranges", "bytes").header("content-type", result.contentType).header("x-content-type-options", "nosniff");
-  if (result.start !== null && result.end !== null) {
-    reply.header("content-length", String(result.end - result.start + 1));
-    reply.header("content-range", `bytes ${result.start}-${result.end}/${result.size}`);
-  } else {
-    
 
-    // cloud run body size limit is 32mb, using chunked to send large files
-    reply.removeHeader("content-length");
-    reply.header("transfer-encoding", "chunked");
+  reply.hijack();
+  const response = reply.raw;
+  response.statusCode = result.statusCode;
+  response.setHeader("accept-ranges", "bytes");
+  response.setHeader("content-type", result.contentType);
+  response.setHeader("x-content-type-options", "nosniff");
+  if (result.start !== null && result.end !== null) {
+    response.setHeader("content-length", String(result.end - result.start + 1));
+    response.setHeader("content-range", `bytes ${result.start}-${result.end}/${result.size}`);
+  } else {
+    response.removeHeader("content-length");
+    response.setHeader("transfer-encoding", "chunked");
   }
-  if (download || !result.inlineSafe) reply.header("content-disposition", attachmentHeader(node.name));
-  result.stream.once("error", (error) => request.log.error({ err: error, nodeId: node.id }, "Cloud Storage download stream failed"));
-  return reply.send(result.stream);
+  if (download || !result.inlineSafe) response.setHeader("content-disposition", attachmentHeader(node.name));
+
+  const destroySource = () => {
+    if (!result.stream.destroyed) result.stream.destroy();
+  };
+  request.raw.once("aborted", destroySource);
+  response.once("close", destroySource);
+  result.stream.once("error", (error) => {
+    request.log.error({ err: error, nodeId: node.id }, "Cloud Storage download stream failed");
+    if (!response.destroyed) response.destroy(error);
+  });
+
+  // flush headers before the first storage chunk
+  response.flushHeaders();
+  result.stream.pipe(response);
+  return reply;
 }
