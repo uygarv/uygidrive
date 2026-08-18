@@ -28,8 +28,9 @@ function replyRecorder() {
   return { reply: reply as unknown as FastifyReply, headers, body, chunks, get flushed() { return flushed; }, get hijacked() { return hijacked; } };
 }
 
-function request(range?: string) {
+function request(range?: string, httpVersionMajor = 1) {
   const raw = new PassThrough();
+  Object.assign(raw, { httpVersionMajor });
   return { headers: { range }, raw, log: { error: () => undefined } } as unknown as FastifyRequest;
 }
 
@@ -46,6 +47,16 @@ test("streams a full response without Content-Length", async () => {
   assert.equal(headers.get("transfer-encoding"), "chunked");
   assert.equal(headers.get("accept-ranges"), "bytes");
   assert.match(headers.get("content-disposition") ?? "", /attachment/);
+});
+
+test("uses HTTP/2 frames instead of an HTTP/1 transfer header", async () => {
+  const result = replyRecorder();
+  const drive = { stream: async () => ({ stream: Readable.from("content"), statusCode: 200, size: node.sizeBytes, contentType: "video/mp4", start: null, end: null, download: false, inlineSafe: true }) } as unknown as DriveService;
+  await sendNodeContent(request(undefined, 2), result.reply, drive, node);
+  await new Promise<void>((resolve) => result.body.once("end", resolve));
+  assert.equal(result.flushed, true);
+  assert.equal(result.headers.get("transfer-encoding"), undefined);
+  assert.equal(result.headers.has("content-length"), false);
 });
 
 test("forwards download ranges and sets partial response headers", async () => {

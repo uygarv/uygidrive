@@ -34,7 +34,13 @@ export type BuildAppOptions = {
 };
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.config.environment !== "test", bodyLimit: 20 * 1024 * 1024, });
+  const fastifyOptions = { logger: options.config.environment !== "test", bodyLimit: 20 * 1024 * 1024 };
+  // Fastify's HTTP/2 overload requires a literal `true`, while this setting is
+  // runtime configuration. The application routes themselves are compatible
+  // with Node's HTTP/1 and h2c request/reply APIs.
+  const app = (options.config.enableHttp2
+    ? Fastify({ ...fastifyOptions, http2: true })
+    : Fastify(fastifyOptions)) as unknown as FastifyInstance;
   const repository = options.repository ?? new FirestoreDriveRepository(options.firebase.firestore, options.config.defaultStorageLimitBytes);
   const context: AppContext = {
     config: options.config,

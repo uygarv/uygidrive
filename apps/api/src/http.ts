@@ -41,7 +41,9 @@ export async function sendNodeContent(request: FastifyRequest, reply: FastifyRep
     response.setHeader("content-range", `bytes ${result.start}-${result.end}/${result.size}`);
   } else {
     response.removeHeader("content-length");
-    response.setHeader("transfer-encoding", "chunked");
+    // Transfer-Encoding is illegal in HTTP/2. Its native frames stream the
+    // response and avoid Cloud Run's HTTP/1 full-response size limit.
+    if (request.raw.httpVersionMajor !== 2) response.setHeader("transfer-encoding", "chunked");
   }
   if (download || !result.inlineSafe) response.setHeader("content-disposition", attachmentHeader(node.name));
 
@@ -55,7 +57,8 @@ export async function sendNodeContent(request: FastifyRequest, reply: FastifyRep
     if (!response.destroyed) response.destroy(error);
   });
 
-  // flush headers before the first storage chunk
+  // Flush headers before the first Storage chunk. In HTTP/1 this commits
+  // chunked transfer encoding; HTTP/2 uses native stream frames instead.
   response.flushHeaders();
   result.stream.pipe(response);
   return reply;

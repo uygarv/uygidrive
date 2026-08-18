@@ -12,6 +12,7 @@ const environmentSchema = z.object({
   UPLOAD_INTENT_TTL_MINUTES: z.coerce.number().int().positive().max(7 * 24 * 60).default(7 * 24 * 60),
   TRASH_RETENTION_DAYS: z.coerce.number().int().positive().max(365).default(30),
   MAINTENANCE_TOKEN: z.string().min(32).optional(),
+  ENABLE_HTTP2: z.enum(["true", "false"]).default("false"),
 });
 
 export type AppConfig = {
@@ -26,6 +27,7 @@ export type AppConfig = {
   uploadIntentTtlMinutes: number;
   trashRetentionDays: number;
   maintenanceToken: string | null;
+  enableHttp2: boolean;
 };
 
 function decodeServiceAccount(value: string) {
@@ -55,5 +57,6 @@ export function loadConfig(environment = process.env): AppConfig {
     uploadIntentTtlMinutes: parsed.UPLOAD_INTENT_TTL_MINUTES,
     trashRetentionDays: parsed.TRASH_RETENTION_DAYS,
     maintenanceToken: parsed.MAINTENANCE_TOKEN ?? null,
+    enableHttp2: parsed.ENABLE_HTTP2 === "true",
   };
 }

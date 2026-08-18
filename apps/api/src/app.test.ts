@@ -17,6 +17,7 @@ const config: AppConfig = {
   uploadIntentTtlMinutes: 60,
   trashRetentionDays: 30,
   maintenanceToken: null,
+  enableHttp2: false,
 };
 
 async function testApp() {

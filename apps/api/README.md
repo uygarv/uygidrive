@@ -20,6 +20,22 @@ npm run test
 npm run build
 ```
 
+## Cloud Run large downloads
+
+For production proxy downloads above 32 MiB, enable Cloud Run HTTP/2 and the
+matching h2c server mode together:
+
+```bash
+gcloud run services update uygidrive-api \
+  --project=uygidrive \
+  --region=europe-west1 \
+  --use-http2 \
+  --set-env-vars=ENABLE_HTTP2=true
+```
+
+Keep `ENABLE_HTTP2=false` for local HTTP/1 development. Do not enable one
+without the other.
+
 ## Legacy migration
 
 `npm run migrate:legacy` is a dry run. It inventories the existing bucket, excludes `.uygidrive-storage.json`, derives explicit folder/node records, carries public Storage metadata into Firestore shares, and prints counts. Take a Firestore export and reconcile the totals before running:
