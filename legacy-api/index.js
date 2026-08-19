@@ -32,7 +32,7 @@ const serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOU
 
 const app = express();
 
-app.use(express.static("views"));
+app.use(express.static("legacy-views"));
 
 app.use('/common',express.static(path.join(DIR, 'public/common')));
 
@@ -40,7 +40,7 @@ const bodyParser = require("body-parser");
 app.use(express.json());
 app.use(cookie())
 
-app.set('views', path.join(__dirname, '../views'));
+app.set('views', path.join(__dirname, '../legacy-views'));
 app.set("view engine", "ejs");
 
 let minifiedCache = {}
@@ -204,7 +204,7 @@ app.get("/login", async (req, res) => {
     
     res.redirect("/drive")
   } catch (error) {
-    res.sendFile("login/login.html", {root: "./views"})
+    res.sendFile("login/login.html", {root: "./legacy-views"})
   }
 });
 
