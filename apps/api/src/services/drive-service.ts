@@ -4,7 +4,7 @@ import { safeFileName } from "../lib/format.js";
 import type { AccessMode, NodeRecord, UploadRecord } from "../types.js";
 import type { Readable } from "node:stream";
 import type { DriveRepository, ListNodesInput } from "../repositories/drive-repository.js";
-import { LEGACY_UPLOAD_CHUNK_BYTES, StorageService, UPLOAD_CHUNK_ALIGNMENT, UPLOAD_CHUNK_BYTES } from "./storage-service.js";
+import { StorageService, UPLOAD_CHUNK_ALIGNMENT, UPLOAD_CHUNK_BYTES } from "./storage-service.js";
 
 export class DriveService {
   constructor(private readonly repository: DriveRepository, private readonly storage: StorageService, private readonly uploadIntentTtlMinutes: number) {}
@@ -151,8 +151,8 @@ export class DriveService {
       await this.repository.updateUploadProgress(ownerId, uploadId, progress.receivedBytes);
       throw new ApiError(409, "UPLOAD_OFFSET_MISMATCH", "The upload position has changed. Resume from the reported receivedBytes.", { receivedBytes: progress.receivedBytes });
     }
-    const isSupportedChunkSize = chunkBytes === UPLOAD_CHUNK_BYTES || chunkBytes === LEGACY_UPLOAD_CHUNK_BYTES;
-    if ((!isFinalChunk && (!isSupportedChunkSize || chunkBytes % UPLOAD_CHUNK_ALIGNMENT !== 0)) || (isFinalChunk && chunkBytes > UPLOAD_CHUNK_BYTES)) throw new ApiError(422, "INVALID_CHUNK_SIZE", "Upload chunks must be 32 MiB except for the final chunk.");
+    const isSupportedChunkSize = chunkBytes === UPLOAD_CHUNK_BYTES;
+    if ((!isFinalChunk && (!isSupportedChunkSize || chunkBytes % UPLOAD_CHUNK_ALIGNMENT !== 0)) || (isFinalChunk && chunkBytes > UPLOAD_CHUNK_BYTES)) throw new ApiError(422, "INVALID_CHUNK_SIZE", "Upload chunks must be 16 MiB except for the final chunk.");
     try {
       const result = await this.storage.uploadChunk(upload, source, range.start, range.end);
       const updated = await this.repository.updateUploadProgress(ownerId, uploadId, result.receivedBytes);

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { createCanvas } from "@napi-rs/canvas";
 import sharp from "sharp";
 import { ApiError } from "../lib/errors.js";
 import type { NodeRecord, UploadRecord } from "../types.js";
@@ -19,10 +20,7 @@ export type StreamResult = {
   durationSeconds?: number;
 };
 
-export const UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024;
-// Keep uploads started by already-open clients working during the 16 → 32 MiB
-// rollout. New clients always send UPLOAD_CHUNK_BYTES.
-export const LEGACY_UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 export const UPLOAD_CHUNK_ALIGNMENT = 256 * 1024;
 
 type ResumableResponse = { status: number; headers: Record<string, string | string[] | undefined>; data?: unknown };
@@ -374,7 +372,7 @@ export class StorageService {
       if (!exists) await this.createPreview(node, preview);
       return { stream: preview.createReadStream(), contentType: PREVIEW_CONTENT_TYPE };
     } catch {
-      // A corrupt image or a failed cache write should never prevent browsing files.
+
       return null;
     }
   }
@@ -455,6 +453,11 @@ export class StorageService {
     if (!node.storageKey) return;
 
     try {
+      if (isPreviewablePdf(node)) {
+        await this.createPdfPreview(node, preview);
+        return;
+      }
+
       if (isPreviewableVideo(node)) {
         await this.createVideoPreview(node, preview);
         return;
@@ -464,9 +467,7 @@ export class StorageService {
         this.bucket.file(node.storageKey).createReadStream(),
         sharp({
           animated: false,
-          // libvips renders the first PDF page directly. This avoids the
-          // PDF.js + Skia canvas path, which can crash the Node process.
-          density: isPreviewablePdf(node) ? 144 : 72,
+          density: 72,
           limitInputPixels: 40_000_000,
         })
           .rotate()
@@ -496,6 +497,54 @@ export class StorageService {
         .catch(() => undefined);
 
       throw error;
+    }
+  }
+
+  private async createPdfPreview(
+    node: NodeRecord,
+    preview: ReturnType<FirebaseServices["bucket"]["file"]>,
+  ) {
+    if (!node.storageKey) return;
+
+    const source = this.bucket.file(node.storageKey);
+    const [signedUrl] = await source.getSignedUrl({
+      version: "v4",
+      action: "read",
+      expires: Date.now() + 5 * 60 * 1000,
+    });
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const document = await pdfjs.getDocument({
+      url: signedUrl,
+      rangeChunkSize: 1024 * 1024,
+      disableFontFace: true,
+      useSystemFonts: true,
+    }).promise;
+    try {
+      const page = await document.getPage(1);
+      const sourceViewport = page.getViewport({ scale: 1 });
+      const scale = Math.min(2, 960 / Math.max(sourceViewport.width, sourceViewport.height));
+      const viewport = page.getViewport({ scale });
+      const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+      const context = canvas.getContext("2d");
+      await page.render({ canvas: null, canvasContext: context as unknown as CanvasRenderingContext2D, viewport }).promise;
+      await pipeline(
+        Readable.from(await canvas.encode("webp", 82)),
+        preview.createWriteStream({
+          resumable: false,
+          metadata: {
+            contentType: PREVIEW_CONTENT_TYPE,
+            cacheControl: "private, max-age=86400",
+            metadata: {
+              ownerId: node.ownerId,
+              nodeId: node.id,
+              source: "pdf-preview",
+            },
+          },
+        }),
+      );
+      page.cleanup();
+    } finally {
+      await document.destroy();
     }
   }
 

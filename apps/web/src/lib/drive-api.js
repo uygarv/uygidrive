@@ -195,7 +195,7 @@ function normalizeStorage(storage) {
     : null;
 }
 
-const UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024;
+const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 const UPLOAD_RETRY_LIMIT = 3;
 
 function xhrUploadChunk(uploadId, chunk, start, end, total, onProgress) {

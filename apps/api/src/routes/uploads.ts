@@ -36,7 +36,7 @@ export async function registerUploadRoutes(app: FastifyInstance, context: AppCon
     return { uploads: uploads.filter((upload) => ["pending", "streaming"].includes(upload.status)).map((upload) => ({ id: upload.id, parentId: upload.parentId, name: upload.name, contentType: upload.contentType, expectedBytes: upload.expectedBytes, receivedBytes: upload.receivedBytes, status: upload.status, expiresAt: upload.expiresAt.toISOString() })) };
   });
 
-  // Leave room above the raw 32 MiB body for Fastify's request accounting.
+  // Leave room above the raw 16 MiB body for Fastify's request accounting.
   app.put("/v1/uploads/:uploadId/chunk", { bodyLimit: UPLOAD_CHUNK_BYTES + 1024 * 1024, config: { rateLimit: false } }, async (request, reply) => {
     const user = await requireUser(request, context.firebase.auth);
     const { uploadId } = parse(z.object({ uploadId: idSchema }), request.params);

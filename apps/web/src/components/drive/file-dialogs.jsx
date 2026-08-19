@@ -1317,10 +1317,7 @@ function PdfPreview({ file, url, onReady, onError }) {
     if (viewer && target) {
       // scrollIntoView also scrolls the preview dialog's ancestors, which can
       // move the toolbar out of view. Limit page navigation to the PDF pane.
-      viewer.scrollTo({
-        top: target.getBoundingClientRect().top - viewer.getBoundingClientRect().top + viewer.scrollTop,
-        behavior: "smooth",
-      });
+      viewer.scrollTop = target.getBoundingClientRect().top - viewer.getBoundingClientRect().top + viewer.scrollTop;
     }
   }
   function selectPage(nextPage) {
