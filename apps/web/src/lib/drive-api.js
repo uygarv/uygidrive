@@ -181,6 +181,8 @@ function normalizeFile(file) {
     owner: file.owner || null,
     uploadedBy: file.uploadedBy || null,
     isShared: Boolean(file.isShared),
+    hasActiveLink: Boolean(file.hasActiveLink),
+    sharedRecipientCount: Number(file.sharedRecipientCount || 0),
   };
 }
 
@@ -500,6 +502,13 @@ export const driveApi = {
       {
         method: "DELETE",
       },
+    );
+  },
+
+  invalidatePrivateLinks(nodeId) {
+    return request(
+      `/v1/nodes/${encodeURIComponent(nodeId)}/private-links`,
+      { method: "DELETE" },
     );
   },
 

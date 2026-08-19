@@ -48,6 +48,7 @@ function DialogOverlay({
 
 function DialogContent({
   className,
+  overlayClassName,
   children,
   showCloseButton = true,
   keepMounted = false,
@@ -55,7 +56,7 @@ function DialogContent({
 }) {
   return (
     <DialogPortal keepMounted={keepMounted}>
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(

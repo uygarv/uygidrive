@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { AppContext } from "../app.js";
-import { accessModeSchema, idSchema, nullableIdSchema, pageSizeSchema, parse, sortSchema, trashQuerySchema } from "../contracts.js";
+import { accessModeSchema, idSchema, nullableIdSchema, pageSizeSchema, parse, shareStatusSchema, sortSchema, trashQuerySchema } from "../contracts.js";
 import { ApiError } from "../lib/errors.js";
 import { formatBytes } from "../lib/format.js";
 import { nodeResponse, sendNodeContent, userIdentityResponse } from "../http.js";
@@ -24,11 +24,16 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
     const percentUsed = Math.min(100, Math.round((storage.storageUsedBytes / storage.storageLimitBytes) * 100));
     const items = await Promise.all(result.items.map(async (node) => {
       const shares = await context.drive.listShares(user.uid, node.id);
-      const isShared = node.accessMode === "private" && shares.some((share) => share.mode === "recipient" && !share.revokedAt && (!share.expiresAt || share.expiresAt > new Date()));
+      const now = new Date();
+      const activeShares = shares.filter((share) => !share.revokedAt && (!share.expiresAt || share.expiresAt > now));
+      const shareStatus = parse(shareStatusSchema, {
+        hasActiveLink: activeShares.some((share) => share.mode === "public" || share.mode === "link"),
+        sharedRecipientCount: activeShares.filter((share) => share.mode === "recipient").length,
+      });
       const uploadedBy = node.createdBy && node.createdBy !== node.ownerId
         ? userIdentityResponse((await context.repository.getUser(node.createdBy)) ?? { id: node.createdBy, username: null, avatarVersion: null })
         : null;
-      return { ...nodeResponse(node), isShared, uploadedBy };
+      return { ...nodeResponse(node), ...shareStatus, isShared: shareStatus.hasActiveLink || shareStatus.sharedRecipientCount > 0, uploadedBy };
     }));
     return { items, nextCursor: result.nextCursor, breadcrumbs: result.breadcrumbs.map(nodeResponse), storage: { usedBytes: storage.storageUsedBytes, reservedBytes: storage.storageReservedBytes, limitBytes: storage.storageLimitBytes, usedDisplay: formatBytes(storage.storageUsedBytes), limitDisplay: formatBytes(storage.storageLimitBytes), percentUsed, isUnlimited: false, limitLabel: formatBytes(storage.storageLimitBytes) } };
   });

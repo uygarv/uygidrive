@@ -56,6 +56,7 @@ export interface DriveRepository {
   createShare(input: { id: string; nodeId: string; ownerId: string; mode: ShareMode; linkTarget: ShareRecord["linkTarget"]; publicId: string | null; tokenHash: string | null; recipientId: string | null; role: ShareRecord["role"]; expiresAt: Date | null }): Promise<ShareRecord>;
   listShares(ownerId: string, nodeId: string): Promise<ShareRecord[]>;
   revokeShare(ownerId: string, shareId: string): Promise<void>;
+  revokePrivateLinks(ownerId: string, nodeId: string): Promise<number>;
   updateShareRole(ownerId: string, shareId: string, role: "viewer" | "editor"): Promise<ShareRecord>;
   resolvePublicShare(publicId: string): Promise<ShareRecord | null>;
   resolveTokenShare(tokenHash: string): Promise<ShareRecord | null>;

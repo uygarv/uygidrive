@@ -68,6 +68,22 @@ test("empties every page of Trash and permanently removes stored files", async (
   assert.equal(result.deletedItems, 3);
 });
 
+test("revokes all private links for an owned item", async () => {
+  let requested: { ownerId: string; nodeId: string } | null = null;
+  const repository = {
+    revokePrivateLinks: async (ownerId: string, nodeId: string) => {
+      requested = { ownerId, nodeId };
+      return 2;
+    },
+  } as unknown as DriveRepository;
+  const drive = new DriveService(repository, {} as StorageService, 60);
+
+  const revoked = await drive.revokePrivateLinks("user", file.id);
+
+  assert.deepEqual(requested, { ownerId: "user", nodeId: file.id });
+  assert.equal(revoked, 2);
+});
+
 test("forwards an aligned 32 MiB chunk and persists Storage's acknowledged offset", async () => {
   const upload: UploadRecord = {
     id: "upl_123456789012", ownerId: "user", actorId: "user", nodeId: "fil_123456789012", parentId: null,

@@ -463,6 +463,9 @@ function ShareContent({ file, currentUserId, onClose }) {
   const [createdLink, setCreatedLink] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [privateLinkCount, setPrivateLinkCount] = useState(0);
+  const [isInvalidatePrivateLinksOpen, setIsInvalidatePrivateLinksOpen] = useState(false);
+  const [isInvalidatingPrivateLinks, setIsInvalidatingPrivateLinks] = useState(false);
   const [recipientQuery, setRecipientQuery] = useState("");
   const [recipientResults, setRecipientResults] = useState([]);
   const [newRecipientRole, setNewRecipientRole] = useState("viewer");
@@ -479,6 +482,7 @@ function ShareContent({ file, currentUserId, onClose }) {
         const publicShare = result.shares?.find((share) => share.mode === "public" && !share.revokedAt);
         setVisibility(file.accessMode || (publicShare ? "public" : "private"));
         setRecipients((result.shares || []).filter((share) => share.mode === "recipient" && !share.revokedAt).map((share) => ({ ...share, username: share.recipient?.username, avatarUrl: share.recipient?.avatarUrl })));
+        setPrivateLinkCount((result.shares || []).filter((share) => share.mode === "link" && !share.revokedAt && (!share.expiresAt || new Date(share.expiresAt) > new Date())).length);
       })
       .catch((error) =>
         {
@@ -509,12 +513,27 @@ function ShareContent({ file, currentUserId, onClose }) {
       const expiryMinutes = { "1h": 60, "1d": 24 * 60, "7d": 7 * 24 * 60, "30d": 30 * 24 * 60 }[linkExpiry];
       const result = await driveApi.createShare(file.id, isPublic ? "public" : "link", { expiresAt: isPublic ? null : new Date(Date.now() + expiryMinutes * 60_000).toISOString(), linkTarget: file.type === "file" ? linkTarget : "preview" });
       setCreatedLink(result.share);
+      if (!isPublic) setPrivateLinkCount((current) => current + 1);
     } catch (error) {
       toast.error("Couldn’t create private link", {
         description: error.message,
       });
     } finally {
       setIsGenerating(false);
+    }
+  }
+  async function invalidatePrivateLinks() {
+    setIsInvalidatingPrivateLinks(true);
+    try {
+      const result = await driveApi.invalidatePrivateLinks(file.id);
+      setPrivateLinkCount((current) => Math.max(0, current - result.revoked));
+      if (createdLink?.mode === "link") setCreatedLink(null);
+      setIsInvalidatePrivateLinksOpen(false);
+      toast.success(result.revoked === 1 ? "Private link invalidated" : `${result.revoked} private links invalidated`);
+    } catch (error) {
+      toast.error("Couldn’t invalidate private links", { description: error.message });
+    } finally {
+      setIsInvalidatingPrivateLinks(false);
     }
   }
   useEffect(() => {
@@ -567,7 +586,7 @@ function ShareContent({ file, currentUserId, onClose }) {
   const accessLabel =
     visibility === "public" ? "Public" : "Private";
   return (
-    <DialogContent keepMounted className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
+    <DialogContent keepMounted className={cn("max-h-[calc(100svh-2rem)] overflow-y-auto transition-[filter] duration-100 sm:max-w-lg", isInvalidatePrivateLinksOpen && "blur-sm")} overlayClassName={isInvalidatePrivateLinksOpen ? "!bg-black/25 !backdrop-blur-lg backdrop-saturate-50" : undefined}>
       <DialogHeader>
         <DialogTitle className="pr-8 leading-5 break-all">Share {file.name}</DialogTitle>
         <DialogDescription>
@@ -622,6 +641,7 @@ function ShareContent({ file, currentUserId, onClose }) {
             <Button type="button" className="mt-2 w-full" onClick={createLink} disabled={isGenerating}>{isGenerating ? <Spinner data-icon="inline-start" /> : <LinkIcon data-icon="inline-start" />}Create link</Button>
             {file.type === "file" && <p className="mt-1.5 text-xs text-muted-foreground">{linkTarget === "content" ? "Opens the file directly through a UygiDrive URL." : "Opens the UygiDrive share preview."}</p>}
             {createdLink?.url && <InputGroup className="mt-3"><InputGroupInput value={createdLink.url} readOnly /><InputGroupAddon align="inline-end"><InputGroupButton size="icon-xs" onClick={() => copy(createdLink.url)} aria-label="Copy share link"><CopyIcon /></InputGroupButton></InputGroupAddon></InputGroup>}
+            {privateLinkCount > 0 && <Button type="button" variant="outline" className="mt-3 w-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setIsInvalidatePrivateLinksOpen(true)}>Invalidate all private links</Button>}
           </Field>
           {visibility === "private" && (
             <Field>
@@ -639,6 +659,21 @@ function ShareContent({ file, currentUserId, onClose }) {
           )}
         </FieldGroup>
       )}
+      <AlertDialog open={isInvalidatePrivateLinksOpen} onOpenChange={setIsInvalidatePrivateLinksOpen}>
+        <AlertDialogContent className="z-[60]" overlayClassName="z-[60] !bg-black/45 !backdrop-blur-lg backdrop-saturate-50">
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10 text-destructive"><LinkIcon /></AlertDialogMedia>
+            <AlertDialogTitle>Invalidate all private links?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This immediately disables {privateLinkCount} active private {privateLinkCount === 1 ? "link" : "links"}. People you gave perms will keep their access.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isInvalidatingPrivateLinks}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={invalidatePrivateLinks} disabled={isInvalidatingPrivateLinks}>{isInvalidatingPrivateLinks && <Spinner data-icon="inline-start" />}Invalidate links</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
           Done

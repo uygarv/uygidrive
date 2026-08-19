@@ -212,6 +212,7 @@ export class DriveService {
   listShares(ownerId: string, nodeId: string) { return this.repository.listShares(ownerId, nodeId); }
   createShare: DriveRepository["createShare"] = (input) => this.repository.createShare(input);
   revokeShare(ownerId: string, shareId: string) { return this.repository.revokeShare(ownerId, shareId); }
+  revokePrivateLinks(ownerId: string, nodeId: string) { return this.repository.revokePrivateLinks(ownerId, nodeId); }
   updateShareRole(ownerId: string, shareId: string, role: "viewer" | "editor") { return this.repository.updateShareRole(ownerId, shareId, role); }
   resolvePublicShare(publicId: string) { return this.repository.resolvePublicShare(publicId); }
   resolveTokenShare(tokenHash: string) { return this.repository.resolveTokenShare(tokenHash); }

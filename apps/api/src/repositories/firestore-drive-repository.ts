@@ -585,6 +585,24 @@ export class FirestoreDriveRepository implements DriveRepository {
     });
   }
 
+  async revokePrivateLinks(ownerId: string, nodeId: string) {
+    const now = new Date();
+    return this.firestore.runTransaction(async (transaction) => {
+      const [node, shares] = await Promise.all([
+        transaction.get(this.nodeRef(nodeId)),
+        transaction.get(this.firestore.collection(SHARES)
+          .where("nodeId", "==", nodeId)
+          .where("mode", "==", "link")
+          .where("revokedAt", "==", null)),
+      ]);
+      const nodeData = requireData(node);
+      if (nodeData.ownerId !== ownerId || nodeData.status !== "active") throw new ApiError(404, "NOT_FOUND", "The file does not exist.");
+      const activeLinks = shares.docs.filter((document) => document.data().ownerId === ownerId);
+      activeLinks.forEach((share) => transaction.update(share.ref, { revokedAt: now, updatedAt: now }));
+      return activeLinks.length;
+    });
+  }
+
   async updateShareRole(ownerId: string, shareId: string, role: "viewer" | "editor") {
     const ref = this.shareRef(shareId);
     await this.firestore.runTransaction(async (transaction) => {

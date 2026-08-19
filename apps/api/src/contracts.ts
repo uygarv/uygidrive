@@ -11,6 +11,13 @@ export const trashQuerySchema = z.object({
   cursor: z.string().max(2048).optional(),
   pageSize: pageSizeSchema,
 });
+export const shareStatusSchema = z.object({
+  hasActiveLink: z.boolean(),
+  sharedRecipientCount: z.number().int().nonnegative(),
+});
+export const revokePrivateLinksResponseSchema = z.object({
+  revoked: z.number().int().nonnegative(),
+});
 export const shareModeSchema = z.enum(["public", "link", "recipient"]);
 export const shareLinkTargetSchema = z.enum(["preview", "content"]);
 export const accessModeSchema = z.enum(["public", "private"]);

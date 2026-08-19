@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { AppContext } from "../app.js";
-import { createShareSchema, idSchema, parse } from "../contracts.js";
+import { createShareSchema, idSchema, parse, revokePrivateLinksResponseSchema } from "../contracts.js";
 import { ApiError } from "../lib/errors.js";
 import { hashToken, id, secretToken } from "../lib/ids.js";
 import { nodeResponse, sendNodeContent, userIdentityResponse } from "../http.js";
@@ -51,6 +51,12 @@ export async function registerShareRoutes(app: FastifyInstance, context: AppCont
     const { shareId } = parse(z.object({ shareId: idSchema }), request.params);
     await context.drive.revokeShare(user.uid, shareId);
     return reply.code(204).send();
+  });
+
+  app.delete("/v1/nodes/:nodeId/private-links", async (request) => {
+    const user = await requireUser(request, context.firebase.auth);
+    const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
+    return parse(revokePrivateLinksResponseSchema, { revoked: await context.drive.revokePrivateLinks(user.uid, nodeId) });
   });
 
   app.patch("/v1/shares/:shareId", async (request) => {
