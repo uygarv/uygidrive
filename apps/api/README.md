@@ -1,6 +1,6 @@
 # UygiDrive API
 
-Fastify 5 / TypeScript API for the Next.js frontend. It is the sole boundary between the browser and Firebase.
+Fastify 5 / TypeScript API for the Next.js frontend.
 
 ## Local development
 
@@ -35,18 +35,6 @@ gcloud run services update uygidrive-api \
 
 Keep `ENABLE_HTTP2=false` for local HTTP/1 development. Do not enable one
 without the other.
-
-## Legacy migration
-
-`npm run migrate:legacy` is a dry run. It inventories the existing bucket, excludes `.uygidrive-storage.json`, derives explicit folder/node records, carries public Storage metadata into Firestore shares, and prints counts. Take a Firestore export and reconcile the totals before running:
-
-```bash
-npm run migrate:legacy -- --apply
-```
-
-The script creates only missing documents. It never overwrites existing Firestore records.
-
-`LEGACY_SHARE_TOKEN_SECRET` is temporary. Set it to the legacy `TOKEN_SECRET` only during the compatibility window for existing JWT private URLs, then remove it.
 
 ## Trash retention
 
