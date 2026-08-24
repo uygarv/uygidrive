@@ -68,7 +68,7 @@ export function MarketingHome({ hasSession }) {
               <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">Simpliest access to your files.</h1>
               <p className="max-w-xl text-lg leading-8 text-muted-foreground">UygiDrive is a boutique place to store your files in the easiest way possible.</p>
             </div>
-            <div className="relative z-10"><SessionActions hasSession={hasSession} placement="hero" transition={transition} /></div>
+            <div className="relative z-10 flex flex-wrap gap-3"><SessionActions hasSession={hasSession} placement="hero" transition={transition} /><Button nativeButton={false} size="lg" variant="outline" render={<Link href="/receive" />}>Receive FileFly</Button></div>
             <div className="relative z-10 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">
               {["2 GB included", "Private by default", "No credit card"].map((item) => <span className="inline-flex items-center gap-1.5" key={item}><CheckIcon className="size-4 text-primary" />{item}</span>)}
             </div>

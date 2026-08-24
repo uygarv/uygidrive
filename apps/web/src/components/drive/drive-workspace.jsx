@@ -21,6 +21,7 @@ import {
   CheckIcon,
   Trash2Icon,
   UploadIcon,
+  SendIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { IdentityAvatar } from "@/components/identity-avatar";
@@ -68,6 +69,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Sheet,
   SheetContent,
@@ -89,6 +91,7 @@ import {
   ShareDialog,
 } from "@/components/drive/file-dialogs";
 import { UploadDialog } from "@/components/drive/upload-dialog";
+import { DeviceTransferDialog } from "@/components/drive/device-transfer-dialog";
 import { UsernameCompletionDialog } from "@/components/profile/username-completion-dialog";
 import { driveApi } from "@/lib/drive-api";
 import { errorMessage } from "@/lib/drive-utils";
@@ -419,6 +422,8 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   const [view, setView] = useState("list");
   const [pagination, setPagination] = useState({ page: 0, cursors: [null] });
   const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [isDeviceTransferOpen, setIsDeviceTransferOpen] = useState(false);
+  const [deviceTransferFile, setDeviceTransferFile] = useState(null);
   const [isFileDropActive, setIsFileDropActive] = useState(false);
   const [isFolderOpen, setIsFolderOpen] = useState(false);
   const [renameFile, setRenameFile] = useState(null);
@@ -722,6 +727,10 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     link.click();
     link.remove();
   }
+  function sendToDevice(file = null) {
+    setDeviceTransferFile(file);
+    setIsDeviceTransferOpen(true);
+  }
 
   const navigationProps = {
     storage: storageQuery.data,
@@ -860,6 +869,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
           </Sheet>
           <div className="ml-auto flex items-center gap-2">
             <UploadStatusBadge status={uploadNotice} />
+            <Button variant="outline" size="sm" onClick={() => router.push("/receive")}>Receive FileFly</Button>
             <ThemeMenu />
           </div>
         </header>
@@ -992,6 +1002,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                   <FolderPlusIcon data-icon="inline-start" />
                   New folder
                 </Button>
+                <Tooltip><TooltipTrigger render={<Button className="sm:hidden" variant="outline" onClick={() => sendToDevice()} />}><SendIcon data-icon="inline-start" />FileFly</TooltipTrigger><TooltipContent>Send a file quickly and directly to another device.</TooltipContent></Tooltip>
                 <Button
                   className="hidden sm:inline-flex"
                   onClick={() => setIsUploadOpen(true)}
@@ -1007,6 +1018,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
                   <FolderPlusIcon data-icon="inline-start" />
                   New folder
                 </Button>
+                <Tooltip><TooltipTrigger render={<Button className="hidden sm:inline-flex" variant="outline" onClick={() => sendToDevice()} />}><SendIcon data-icon="inline-start" />FileFly</TooltipTrigger><TooltipContent>Send a file quickly and directly to another device.</TooltipContent></Tooltip>
                 </>}
               </div>}
             </div>
@@ -1082,6 +1094,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
               }}
               onRename={setRenameFile}
               onShare={openShare}
+              onSendToDevice={!isShared ? sendToDevice : undefined}
               onDelete={(file) => setDeleteTarget({ file, permanent: isTrash || (isShared && sharedRole === "editor") })}
               onRestore={(file) => restore.mutateAsync(file)}
               isTrash={isTrash}
@@ -1108,6 +1121,11 @@ export function DriveWorkspace({ initialSection = "drive" }) {
         onComplete={refresh}
         onUploadsChange={updateUploadNotice}
         onResumeRequired={openUploaderForResume}
+      />
+      <DeviceTransferDialog
+        open={isDeviceTransferOpen}
+        onOpenChange={setIsDeviceTransferOpen}
+        driveFile={deviceTransferFile}
       />
       <AnimatePresence>
         {isFileDropActive && (

@@ -13,6 +13,9 @@ const environmentSchema = z.object({
   TRASH_RETENTION_DAYS: z.coerce.number().int().positive().max(365).default(30),
   MAINTENANCE_TOKEN: z.string().min(32).optional(),
   ENABLE_HTTP2: z.enum(["true", "false"]).default("false"),
+  ENABLE_NATIVE_PREVIEWS: z.enum(["true", "false"]).default("false"),
+  CLOUDFLARE_TURN_KEY_ID: z.string().min(1).optional(),
+  CLOUDFLARE_TURN_API_TOKEN: z.string().min(1).optional(),
 });
 
 export type AppConfig = {
@@ -28,6 +31,9 @@ export type AppConfig = {
   trashRetentionDays: number;
   maintenanceToken: string | null;
   enableHttp2: boolean;
+  enableNativePreviews: boolean;
+  cloudflareTurnKeyId: string | null;
+  cloudflareTurnApiToken: string | null;
 };
 
 function decodeServiceAccount(value: string) {
@@ -58,5 +64,8 @@ export function loadConfig(environment = process.env): AppConfig {
     trashRetentionDays: parsed.TRASH_RETENTION_DAYS,
     maintenanceToken: parsed.MAINTENANCE_TOKEN ?? null,
     enableHttp2: parsed.ENABLE_HTTP2 === "true",
+    enableNativePreviews: parsed.ENABLE_NATIVE_PREVIEWS === "true",
+    cloudflareTurnKeyId: parsed.CLOUDFLARE_TURN_KEY_ID ?? null,
+    cloudflareTurnApiToken: parsed.CLOUDFLARE_TURN_API_TOKEN ?? null,
   };
 }

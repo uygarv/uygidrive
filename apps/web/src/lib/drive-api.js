@@ -623,6 +623,53 @@ export const driveApi = {
     );
   },
 
+  createDeviceTransfer(source) {
+    return request("/v1/device-transfers", {
+      method: "POST",
+      body: JSON.stringify(source),
+    });
+  },
+
+  joinDeviceTransfer({ invitation = null, code = null } = {}) {
+    return request("/v1/device-transfers/join", {
+      method: "POST",
+      body: JSON.stringify({
+        ...(invitation ? { invitation } : {}),
+        ...(code ? { code } : {}),
+      }),
+    });
+  },
+
+  availableDeviceTransfers() {
+    return request("/v1/device-transfers/available");
+  },
+
+  joinOwnDeviceTransfer(transferId) {
+    return request(`/v1/device-transfers/${encodeURIComponent(transferId)}/join-own`, {
+      method: "POST",
+    });
+  },
+
+  deviceTransfer(transferId, receiverToken = null) {
+    return request(`/v1/device-transfers/${encodeURIComponent(transferId)}`, {
+      headers: receiverToken ? { Authorization: `Bearer ${receiverToken}` } : {},
+    });
+  },
+
+  deviceTransferSignals(transferId, after = 0, receiverToken = null) {
+    return request(`/v1/device-transfers/${encodeURIComponent(transferId)}/signals?${new URLSearchParams({ after: String(after) }).toString()}`, {
+      headers: receiverToken ? { Authorization: `Bearer ${receiverToken}` } : {},
+    });
+  },
+
+  sendDeviceTransferSignal(transferId, type, payload = {}, receiverToken = null) {
+    return request(`/v1/device-transfers/${encodeURIComponent(transferId)}/signals`, {
+      method: "POST",
+      headers: receiverToken ? { Authorization: `Bearer ${receiverToken}` } : {},
+      body: JSON.stringify({ type, payload }),
+    });
+  },
+
   publicContentUrl(publicId) {
     return endpoint(
       `/v1/public/${encodeURIComponent(publicId)}/content`,

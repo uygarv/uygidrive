@@ -18,6 +18,9 @@ const config: AppConfig = {
   trashRetentionDays: 30,
   maintenanceToken: null,
   enableHttp2: false,
+  enableNativePreviews: false,
+  cloudflareTurnKeyId: null,
+  cloudflareTurnApiToken: null,
 };
 
 async function testApp(overrides: Partial<AppConfig> = {}) {

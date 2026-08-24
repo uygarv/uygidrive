@@ -5,6 +5,20 @@ export const usernameSchema = z.string().trim().regex(/^[a-z0-9_]{3,20}$/, "User
 export const passwordSchema = z.string().min(6).max(1024);
 export const idSchema = z.string().regex(/^[a-z]+_[A-Za-z0-9_-]{12,}$/);
 export const nullableIdSchema = idSchema.nullable();
+export const deviceTransferStatusSchema = z.enum(["created", "joined", "connected", "transferring", "completed", "rejected", "cancelled", "failed", "expired"]);
+export const deviceTransferResponseSchema = z.object({
+  id: idSchema,
+  source: z.enum(["drive", "local"]),
+  name: z.string(),
+  contentType: z.string().nullable(),
+  sizeBytes: z.number().int().positive(),
+  status: deviceTransferStatusSchema,
+  pairingExpiresAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+});
+export const availableDeviceTransfersResponseSchema = z.object({
+  transfers: z.array(deviceTransferResponseSchema),
+});
 export const sortSchema = z.enum(["date:new-first", "date:old-first", "size:largest-first", "size:smallest-first"]).default("date:new-first");
 export const pageSizeSchema = z.coerce.number().int().min(1).max(100).default(25);
 export const trashQuerySchema = z.object({

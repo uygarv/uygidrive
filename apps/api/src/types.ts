@@ -86,6 +86,38 @@ export type AuthenticatedUser = {
   email: string | null;
 };
 
+export type DeviceTransferSource = "drive" | "local";
+export type DeviceTransferStatus = "created" | "joined" | "connected" | "transferring" | "completed" | "rejected" | "cancelled" | "failed" | "expired";
+export type DeviceTransferSignalType = "offer" | "answer" | "candidate" | "candidates" | "accept" | "reject" | "complete" | "cancel" | "status";
+
+export type DeviceTransferRecord = {
+  id: string;
+  ownerId: string;
+  source: DeviceTransferSource;
+  driveNodeId: string | null;
+  name: string;
+  contentType: string | null;
+  sizeBytes: number;
+  invitationTokenHash: string;
+  manualCodeHash: string;
+  receiverTokenHash: string | null;
+  status: DeviceTransferStatus;
+  pairingExpiresAt: Date;
+  expiresAt: Date;
+  nextSignalSequence: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type DeviceTransferSignal = {
+  id: string;
+  sequence: number;
+  recipient: "sender" | "receiver";
+  type: DeviceTransferSignalType;
+  payload: Record<string, unknown>;
+  createdAt: Date;
+};
+
 export type Page<T> = {
   items: T[];
   nextCursor: string | null;

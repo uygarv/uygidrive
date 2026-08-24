@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createCanvas } from "@napi-rs/canvas";
-import sharp from "sharp";
 import { ApiError } from "../lib/errors.js";
 import type { NodeRecord, UploadRecord } from "../types.js";
 import type { FirebaseServices } from "../plugins/firebase.js";
@@ -80,6 +78,10 @@ function isVideoContentType(contentType: string | null) {
     ?.trim()
     .toLowerCase()
     .startsWith("video/") ?? false;
+}
+
+async function loadSharp() {
+  return (await import("sharp")).default;
 }
 
 function probeDuration(url: string) {
@@ -161,7 +163,28 @@ function runFfmpegToStream(args: string[]): Readable {
 }
 
 export class StorageService {
-  constructor(private readonly bucket: FirebaseServices["bucket"]) {}
+  // PDF rendering (Skia) and image conversion (libvips) are native modules.
+  // On macOS, running several cold preview generations together can crash the
+  // Node process. Keep generation serialized; serving an existing preview is
+  // still fully concurrent.
+  private previewQueue: Promise<void> = Promise.resolve();
+
+  constructor(
+    private readonly bucket: FirebaseServices["bucket"],
+    private readonly options: { enableNativePreviews?: boolean } = {},
+  ) {}
+
+  private async withPreviewGenerationLock<T>(work: () => Promise<T>) {
+    const previous = this.previewQueue;
+    let release!: () => void;
+    this.previewQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
 
   private authClient() {
     return (this.bucket.storage as unknown as { authClient: StorageAuthClient }).authClient;
@@ -192,6 +215,7 @@ export class StorageService {
     if (!bytes) throw new ApiError(422, "INVALID_AVATAR", "Choose an image for your profile photo.");
     let avatar: Buffer;
     try {
+      const sharp = await loadSharp();
       avatar = await sharp(Buffer.concat(chunks)).rotate().resize(512, 512, { fit: "cover", position: "centre" }).webp({ quality: 82 }).toBuffer();
     } catch {
       throw new ApiError(422, "INVALID_AVATAR", "Profile photos must be valid images.");
@@ -369,7 +393,15 @@ export class StorageService {
     const preview = this.bucket.file(previewStorageKey(node));
     try {
       const [exists] = await preview.exists();
-      if (!exists) await this.createPreview(node, preview);
+      if (!exists) {
+        if (!this.options.enableNativePreviews) return null;
+        await this.withPreviewGenerationLock(async () => {
+          // Another thumbnail request may have produced it while this request
+          // waited in the native-rendering queue.
+          const [created] = await preview.exists();
+          if (!created) await this.createPreview(node, preview);
+        });
+      }
       return { stream: preview.createReadStream(), contentType: PREVIEW_CONTENT_TYPE };
     } catch {
 
@@ -416,6 +448,7 @@ export class StorageService {
       "pipe:1",
     ]);
 
+    const sharp = await loadSharp();
     await pipeline(
       frameStream,
 
@@ -463,6 +496,7 @@ export class StorageService {
         return;
       }
 
+      const sharp = await loadSharp();
       await pipeline(
         this.bucket.file(node.storageKey).createReadStream(),
         sharp({
@@ -513,6 +547,7 @@ export class StorageService {
       expires: Date.now() + 5 * 60 * 1000,
     });
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const { createCanvas } = await import("@napi-rs/canvas");
     const document = await pdfjs.getDocument({
       url: signedUrl,
       rangeChunkSize: 1024 * 1024,

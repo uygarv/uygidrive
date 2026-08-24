@@ -20,6 +20,12 @@ npm run test
 npm run build
 ```
 
+Native thumbnail generation is disabled by default (`ENABLE_NATIVE_PREVIEWS=false`), while thumbnails already stored in Firebase Storage remain available. This avoids known local macOS crashes in Skia/libvips. Enable it only after validating the native image/PDF stack in the target environment.
+
+## Send to device / Cloudflare TURN
+
+Device-to-device transfers require Cloudflare Realtime TURN. Create a distinct TURN key for each environment and configure `CLOUDFLARE_TURN_KEY_ID` plus its credential-generation token as Cloud Run secrets. The API generates an 8-hour, per-transfer ICE configuration and never exposes the long-lived Cloudflare key to browsers. Monitor TURN egress and set billing alerts in Cloudflare before enabling this in production.
+
 ## Cloud Run large downloads
 
 For production proxy downloads above 32 MiB, enable Cloud Run HTTP/2 and the

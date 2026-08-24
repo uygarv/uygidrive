@@ -23,6 +23,7 @@ import {
   RotateCcwIcon,
   PlayIcon,
   UserRoundIcon,
+  SendIcon,
 } from "lucide-react";
 import {
   Empty,
@@ -160,7 +161,7 @@ function FileThumbnail({ file, className, iconClassName, grid = false, contentUr
   );
 }
 
-function FileActions({ file, isTrash, readOnly, onDownload, onMove, onRename, onShare, onDelete, onRestore, className }) {
+function FileActions({ file, isTrash, readOnly, onDownload, onMove, onRename, onShare, onSendToDevice, onDelete, onRestore, className }) {
   return (
     <div className={className}>
       <DropdownMenu>
@@ -208,6 +209,10 @@ function FileActions({ file, isTrash, readOnly, onDownload, onMove, onRename, on
                   <Share2Icon />
                   Share
                 </DropdownMenuItem>
+                {onSendToDevice && <DropdownMenuItem onClick={() => onSendToDevice(file)}>
+                  <SendIcon />
+                  FileFly
+                </DropdownMenuItem>}
               <DropdownMenuItem onClick={() => onRename(file)}>
                 <PencilIcon />
                 Rename
@@ -315,6 +320,7 @@ export function FileBrowser({
   onItemDragEnd,
   onRename,
   onShare,
+  onSendToDevice,
   onDelete,
   onRestore,
   isTrash = false,
@@ -546,6 +552,7 @@ export function FileBrowser({
               onMove={onMove}
               onRename={onRename}
               onShare={onShare}
+              onSendToDevice={onSendToDevice}
               onDelete={onDelete}
               onRestore={onRestore}
               isTrash={isTrash}
