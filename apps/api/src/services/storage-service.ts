@@ -546,8 +546,12 @@ export class StorageService {
       action: "read",
       expires: Date.now() + 5 * 60 * 1000,
     });
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const { createCanvas } = await import("@napi-rs/canvas");
+    // Load the native PDF rendering stack only when preview generation is
+    // enabled and a PDF preview is actually requested.
+    const pdfjsModule = "pdfjs-dist/legacy/build/pdf.mjs";
+    const canvasModule = "@napi-rs/canvas";
+    const pdfjs = await import(pdfjsModule);
+    const { createCanvas } = await import(canvasModule);
     const document = await pdfjs.getDocument({
       url: signedUrl,
       rangeChunkSize: 1024 * 1024,
