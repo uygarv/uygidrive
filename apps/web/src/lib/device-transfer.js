@@ -1,6 +1,9 @@
 import { driveApi } from "@/lib/drive-api";
 
 const DEFAULT_CHUNK_BYTES = 64 * 1024;
+// Keep individual SCTP messages comfortably below the commonly supported
+// 256 KiB ceiling. On a lossy Wi-Fi link a 256 KiB ordered message is split
+// into many packets; one lost packet can then delay the following messages.
 const PREFERRED_CHUNK_BYTES = 128 * 1024;
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 const BUFFERED_AMOUNT_LOW_BYTES = 7 * 1024 * 1024;
@@ -44,7 +47,7 @@ export function supportsStreamedDeviceSave() {
 }
 
 export class DeviceTransferPeer {
-  constructor({ role, transfer, iceServers, receiverToken = null, onState, onProgress, onIncoming, onNetwork, onConnection, onDownload }) {
+  constructor({ role, transfer, iceServers, receiverToken = null, onState, onProgress, onIncoming, onNetwork, onConnection, onDownload, onSavedFile }) {
     this.role = role;
     this.transfer = transfer;
     this.iceServers = iceServers;
@@ -55,10 +58,12 @@ export class DeviceTransferPeer {
     this.onNetwork = onNetwork;
     this.onConnection = onConnection;
     this.onDownload = onDownload;
+    this.onSavedFile = onSavedFile;
     this.sequence = 0;
     this.poller = null;
     this.closed = false;
     this.writer = null;
+    this.fileHandle = null;
     this.receivedBytes = 0;
     this.source = null;
     this.accepted = false;
@@ -68,8 +73,11 @@ export class DeviceTransferPeer {
     this.pendingCandidates = [];
     this.candidateFlushTimer = null;
     this.disconnectTimer = null;
+    this.signalingFailureTimer = null;
     this.iceRestartTimer = null;
     this.iceRestartInFlight = false;
+    this.pendingRecoveryOffer = null;
+    this.recoveryOfferSending = false;
     this.descriptionSignaled = false;
     this.polling = false;
     this.chunkBytes = DEFAULT_CHUNK_BYTES;
@@ -78,6 +86,7 @@ export class DeviceTransferPeer {
     this.pendingProgress = null;
     this.senderProgressTimer = null;
     this.sentBytes = 0;
+    this.transferStarted = false;
     this.connectionStatsTimer = null;
     this.connectionSpeedSamples = [];
   }
@@ -139,8 +148,39 @@ export class DeviceTransferPeer {
     if (this.disconnectTimer || this.closed) return;
     this.disconnectTimer = window.setTimeout(() => {
       this.disconnectTimer = null;
-      if (!this.closed && this.peer?.connectionState === "disconnected") this.fail(new Error("The device connection was interrupted."));
+      if (!this.closed && ["disconnected", "failed"].includes(this.peer?.connectionState)) this.fail(new Error("The device connection was interrupted."));
     }, DISCONNECT_GRACE_MS);
+  }
+
+  clearSignalingFailureTimer() {
+    if (this.signalingFailureTimer) window.clearTimeout(this.signalingFailureTimer);
+    this.signalingFailureTimer = null;
+  }
+
+  signalingFailed(error) {
+    if (this.closed) return;
+    // Authoritative API responses cannot be repaired by waiting for a new
+    // network. Everything else is commonly a short fetch failure during a
+    // Wi-Fi-to-cellular handoff.
+    if (["TRANSFER_NOT_FOUND", "TRANSFER_UNAVAILABLE", "UNAUTHENTICATED"].includes(error?.code)) {
+      this.fail(error);
+      return;
+    }
+    this.beginConnectionRecovery();
+    if (this.signalingFailureTimer) return;
+    this.signalingFailureTimer = window.setTimeout(() => {
+      this.signalingFailureTimer = null;
+      if (!this.closed) this.fail(new Error("The secure connection could not be restored."));
+    }, DISCONNECT_GRACE_MS);
+  }
+
+  signalingRecovered() {
+    this.clearSignalingFailureTimer();
+    // An ICE restart offer or late candidates may have been created while the
+    // sender had no route to the signaling API. Deliver them after the first
+    // successful request on the new network.
+    this.flushRecoveryOffer().catch((error) => this.signalingFailed(error));
+    this.flushCandidates().catch((error) => this.signalingFailed(error));
   }
 
   beginConnectionRecovery() {
@@ -176,13 +216,25 @@ export class DeviceTransferPeer {
       const offer = await this.peer.createOffer({ iceRestart: true });
       if (this.closed) return;
       await this.peer.setLocalDescription(offer);
-      await this.signal("offer", { description: serializableDescription(offer) });
-      await this.flushCandidates();
-    } catch {
-      // The grace timer remains the final authority. A second connection-state
-      // change can schedule another restart if the browser becomes stable.
+      this.pendingRecoveryOffer = { description: serializableDescription(offer) };
+      await this.flushRecoveryOffer();
+    } catch (error) {
+      this.signalingFailed(error);
     } finally {
       this.iceRestartInFlight = false;
+    }
+  }
+
+  async flushRecoveryOffer() {
+    if (this.closed || this.recoveryOfferSending || !this.pendingRecoveryOffer) return;
+    const payload = this.pendingRecoveryOffer;
+    this.recoveryOfferSending = true;
+    try {
+      await this.signal("offer", payload);
+      if (this.pendingRecoveryOffer === payload) this.pendingRecoveryOffer = null;
+      await this.flushCandidates();
+    } finally {
+      this.recoveryOfferSending = false;
     }
   }
 
@@ -200,8 +252,8 @@ export class DeviceTransferPeer {
     channel.bufferedAmountLowThreshold = BUFFERED_AMOUNT_LOW_BYTES;
     channel.onopen = () => {
       // Chrome commonly negotiates 256 KiB SCTP messages, while Safari can
-      // negotiate a smaller limit. Use the largest safe chunk per connection
-      // instead of imposing the old 64 KiB ceiling everywhere.
+      // negotiate a smaller limit. Keep each reliable, ordered SCTP message
+      // below the advertised maximum to reduce retransmission stalls on Wi-Fi.
       const maxMessageSize = this.peer.sctp?.maxMessageSize;
       if (Number.isFinite(maxMessageSize) && maxMessageSize > 0) {
         this.chunkBytes = Math.max(16 * 1024, Math.min(PREFERRED_CHUNK_BYTES, maxMessageSize - 1024));
@@ -244,7 +296,11 @@ export class DeviceTransferPeer {
     if (supportsStreamedDeviceSave()) {
       try {
         const handle = await window.showSaveFilePicker({ suggestedName: this.transfer.name, types: this.transfer.contentType ? [{ description: "Transferred file", accept: { [this.transfer.contentType]: ["." + this.transfer.name.split(".").pop()] } }] : undefined });
-        this.writer = await handle.createWritable();
+        this.fileHandle = handle;
+        // Write to a swap file which starts as a copy of the selected file.
+        // The original therefore remains intact until `close()` commits the
+        // fully received replacement; `abort()` leaves it untouched.
+        this.writer = await handle.createWritable({ keepExistingData: true, mode: "exclusive" });
       } catch (error) {
         // A user who explicitly dismisses the desktop picker has not accepted
         // the transfer. Other browser/platform failures fall back to a Blob
@@ -259,6 +315,7 @@ export class DeviceTransferPeer {
       this.memoryChunks = [];
     }
     this.accepted = true;
+    this.transferStarted = true;
     await this.signal("accept");
     this.onState?.("Receiving file");
   }
@@ -271,6 +328,7 @@ export class DeviceTransferPeer {
 
   async startStream() {
     if (!this.source || !this.channel || this.channel.readyState !== "open") return;
+    this.transferStarted = true;
     this.onState?.("Sending file");
     await this.signal("status", { status: "transferring" });
     const stream = await this.source.stream();
@@ -321,8 +379,13 @@ export class DeviceTransferPeer {
     if (this.receivedBytes !== this.transfer.sizeBytes) throw new Error("The received file size does not match the sender’s file.");
     this.reportProgress(this.receivedBytes, true);
     if (this.writer) {
+      // `keepExistingData` protects a replacement that is interrupted. Once
+      // every byte arrived, remove any tail left by a larger previous file
+      // before atomically committing the completed transfer.
+      await this.writer.truncate(this.transfer.sizeBytes);
       await this.writer.close();
       this.writer = null;
+      this.onSavedFile?.({ handle: this.fileHandle, name: this.transfer.name });
     } else {
       const blob = new Blob(this.memoryChunks, { type: this.transfer.contentType || "application/octet-stream" });
       this.memoryChunks = null;
@@ -344,6 +407,7 @@ export class DeviceTransferPeer {
       await this.flushCandidates();
     } else if (signal.type === "answer" && this.role === "sender") {
       await this.peer.setRemoteDescription(serializableDescription(signal.payload.description));
+      this.pendingRecoveryOffer = null;
     } else if (signal.type === "status" && signal.payload?.status === "reconnecting" && this.role === "sender") {
       this.scheduleIceRestart();
     } else if (signal.type === "candidate" && signal.payload.candidate) {
@@ -367,12 +431,13 @@ export class DeviceTransferPeer {
     this.polling = true;
     try {
       const result = await driveApi.deviceTransferSignals(this.transfer.id, this.sequence, this.receiverToken);
+      this.signalingRecovered();
       for (const signal of result.signals || []) {
         this.sequence = Math.max(this.sequence, signal.sequence);
         await this.handleSignal(signal);
       }
     } catch (error) {
-      if (!this.closed) this.fail(error);
+      this.signalingFailed(error);
     } finally {
       this.polling = false;
     }
@@ -408,13 +473,30 @@ export class DeviceTransferPeer {
   async flushCandidates() {
     if (!this.descriptionSignaled || !this.pendingCandidates.length) return;
     const candidates = this.pendingCandidates.splice(0);
-    await this.signal("candidates", { candidates });
+    try {
+      await this.signal("candidates", { candidates });
+    } catch (error) {
+      this.pendingCandidates.unshift(...candidates);
+      throw error;
+    }
   }
 
   selectedCandidatePair(stats) {
     const transport = [...stats.values()].find((report) => report.type === "transport" && report.selectedCandidatePairId);
     if (transport?.selectedCandidatePairId) return stats.get(transport.selectedCandidatePairId);
     return [...stats.values()].find((report) => report.type === "candidate-pair" && (report.selected || (report.nominated && report.state === "succeeded")));
+  }
+
+  selectedDataChannel(stats) {
+    const channels = [...stats.values()].filter((report) => report.type === "data-channel");
+    return channels.find((report) => report.label === "uygidrive-transfer") ?? channels[0] ?? null;
+  }
+
+  bytesFrom(report, field) {
+    const value = report?.[field];
+    if (value === null || value === undefined) return null;
+    const bytes = Number(value);
+    return Number.isFinite(bytes) && bytes >= 0 ? bytes : null;
   }
 
   async updateConnectionMetrics() {
@@ -425,19 +507,31 @@ export class DeviceTransferPeer {
     const remoteCandidate = selectedPair?.remoteCandidateId ? stats.get(selectedPair.remoteCandidateId) : null;
     const mode = localCandidate?.candidateType === "relay" || remoteCandidate?.candidateType === "relay" ? "relay" : "direct";
     const now = performance.now();
-    const bytes = this.role === "sender" ? Number(selectedPair.bytesSent ?? 0) : Number(selectedPair.bytesReceived ?? 0);
-    const pairId = selectedPair.id || null;
+    const direction = this.role === "sender" ? "bytesSent" : "bytesReceived";
+    // DataChannel stats measure the file bytes themselves. Candidate-pair
+    // stats are retained as a fallback for Safari versions that do not expose
+    // data-channel reports.
+    const dataChannel = this.selectedDataChannel(stats);
+    const bytes = this.bytesFrom(dataChannel, direction) ?? this.bytesFrom(selectedPair, direction) ?? 0;
+    const pairId = selectedPair?.id || dataChannel?.id || null;
     const latestSample = this.connectionSpeedSamples.at(-1);
     if (latestSample && (latestSample.pairId !== pairId || bytes < latestSample.bytes)) this.connectionSpeedSamples = [];
     this.connectionSpeedSamples.push({ bytes, at: now, pairId });
     while (this.connectionSpeedSamples.length > 1 && now - this.connectionSpeedSamples[0].at > CONNECTION_SPEED_WINDOW_MS) this.connectionSpeedSamples.shift();
     const oldestSample = this.connectionSpeedSamples[0];
     let mbps = null;
-    if (oldestSample && now > oldestSample.at && bytes >= oldestSample.bytes) {
+    if (this.transferStarted && oldestSample && now > oldestSample.at && bytes > oldestSample.bytes) {
       mbps = ((bytes - oldestSample.bytes) * 8) / (now - oldestSample.at) / 1_000;
     }
     this.onNetwork?.(mode === "relay" ? "Using secure relay" : "Direct connection");
-    this.onConnection?.({ mode, mbps, localCandidateType: localCandidate?.candidateType || null, remoteCandidateType: remoteCandidate?.candidateType || null });
+    this.onConnection?.({
+      mode,
+      mbps,
+      localCandidateType: localCandidate?.candidateType || null,
+      remoteCandidateType: remoteCandidate?.candidateType || null,
+      protocol: localCandidate?.protocol || remoteCandidate?.protocol || null,
+      relayProtocol: localCandidate?.relayProtocol || remoteCandidate?.relayProtocol || null,
+    });
   }
 
   reportProgress(bytes, force = false) {
@@ -491,6 +585,7 @@ export class DeviceTransferPeer {
     if (this.senderProgressTimer) window.clearInterval(this.senderProgressTimer);
     if (this.connectionStatsTimer) window.clearInterval(this.connectionStatsTimer);
     this.clearDisconnectTimer();
+    this.clearSignalingFailureTimer();
     if (this.writer) this.writer.abort().catch(() => undefined);
     this.memoryChunks = null;
     if (sendCancel) this.signal("cancel").catch(() => undefined);

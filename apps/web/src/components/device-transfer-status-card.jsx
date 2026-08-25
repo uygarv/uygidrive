@@ -46,11 +46,20 @@ function copyFor(phase, role) {
 function connectionLabel(connection) {
   if (!connection) return null;
   const kind = connection.mode === "relay" ? "Secure relay" : "Direct connection";
-  if (!Number.isFinite(connection.mbps) || connection.mbps <= 0.05) return kind;
+  if (!Number.isFinite(connection.mbps)) return kind;
   return `${kind} · ${connection.mbps.toFixed(connection.mbps >= 10 ? 0 : 1)} Mbps`;
 }
 
+function candidatePairLabel(connection) {
+  if (!connection?.localCandidateType && !connection?.remoteCandidateType) return null;
+  const local = connection.localCandidateType || "unknown";
+  const remote = connection.remoteCandidateType || "unknown";
+  const protocol = connection.relayProtocol || connection.protocol;
+  return `Selected ICE · ${local} ↔ ${remote}${protocol ? ` · ${protocol.toUpperCase()}` : ""}`;
+}
+
 export function DeviceTransferStatusCard({ role, state, progress = 0, fileName, fileSize, connection }) {
+  const showIceDiagnostics = process.env.NODE_ENV === "development";
   const reduceMotion = useReducedMotion();
   const phase = phaseFor(state, progress, role);
   const copy = copyFor(phase, role);
@@ -58,6 +67,7 @@ export function DeviceTransferStatusCard({ role, state, progress = 0, fileName, 
   const isFailure = phase === "declined" || phase === "cancelled" || phase === "rate-limited" || phase === "invalid-code" || phase === "not-found" || phase === "error";
   const isComplete = phase === "complete";
   const network = connectionLabel(connection);
+  const candidatePair = candidatePairLabel(connection);
   const enter = (delay = 0) => reduceMotion ? {} : {
     initial: { opacity: 0, y: -6 },
     animate: { opacity: 1, y: 0 },
@@ -72,7 +82,7 @@ export function DeviceTransferStatusCard({ role, state, progress = 0, fileName, 
       </motion.div>
       {fileName && <motion.div {...enter(0.04)} className="flex min-w-0 items-center gap-2 rounded-md bg-muted px-2.5 py-2"><FileIcon className="size-4 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate text-sm" title={fileName}>{fileName}</span>{fileSize != null && <span className="shrink-0 text-xs text-muted-foreground">{formatBytes(fileSize)}</span>}</motion.div>}
       {phase === "transferring" && <motion.div {...enter(0.08)} className="space-y-1.5"><div className="flex justify-between text-xs text-muted-foreground"><span>{role === "sender" ? "Sent" : "Received"}</span><span>{progress}%</span></div><Progress value={progress} aria-label={`${role === "sender" ? "Send" : "Receive"} progress`} /></motion.div>}
-      {network && !isComplete && <motion.div {...enter(0.12)}><Badge variant="outline">{network}</Badge></motion.div>}
+      {(network || (showIceDiagnostics && candidatePair)) && !isComplete && <motion.div {...enter(0.12)} className="flex flex-wrap gap-1.5">{network && <Badge variant="outline">{network}</Badge>}{showIceDiagnostics && candidatePair && <Badge variant="outline" title="Selected ICE candidate pair">{candidatePair}</Badge>}</motion.div>}
     </CardContent>
   </Card>;
 }

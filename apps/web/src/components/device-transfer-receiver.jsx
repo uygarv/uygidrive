@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { DownloadIcon, InfoIcon, SendIcon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon, InfoIcon, SendIcon } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,6 +30,7 @@ export function DeviceTransferReceiver() {
   const [receivedBytes, setReceivedBytes] = useState(0);
   const [isJoining, setIsJoining] = useState(false);
   const [download, setDownload] = useState(null);
+  const [savedFile, setSavedFile] = useState(null);
   const [availableTransfers, setAvailableTransfers] = useState([]);
   const [isLoadingAvailableTransfers, setIsLoadingAvailableTransfers] = useState(true);
   const [hasAvailableTransferSession, setHasAvailableTransferSession] = useState(false);
@@ -68,6 +69,7 @@ export function DeviceTransferReceiver() {
         onProgress: (bytes) => setReceivedBytes(bytes),
         onIncoming: () => setState(supportsStreamedDeviceSave() ? "Sender is ready. Choose where to save the file." : "Sender is ready. Start the transfer, then download the file when it is ready."),
         onDownload: setDownload,
+        onSavedFile: setSavedFile,
       });
       peerRef.current = peer;
       await peer.startReceiver();
@@ -133,6 +135,23 @@ export function DeviceTransferReceiver() {
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+
+  async function openSavedFile() {
+    if (!savedFile?.handle) return;
+    // Open the tab during the click event so popup blocking does not prevent
+    // the file from being shown after the asynchronous handle read completes.
+    const tab = window.open("", "_blank");
+    try {
+      const file = await savedFile.handle.getFile();
+      const url = URL.createObjectURL(file);
+      if (tab) tab.location.href = url;
+      else window.location.assign(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      tab?.close();
+      setState(error.message || "Couldn’t open the saved file.");
+    }
   }
 
   function startNewReceive() {
@@ -250,6 +269,12 @@ export function DeviceTransferReceiver() {
           {transfer && (
             <CardFooter className="justify-end gap-2">
               {canStartNewReceive && <Button variant="outline" onClick={startNewReceive}>New receive</Button>}
+              {savedFile && state.includes("complete") && (
+                <Button variant="outline" onClick={openSavedFile}>
+                  <ExternalLinkIcon data-icon="inline-start" />
+                  Open file
+                </Button>
+              )}
               {!terminal && <Button variant="outline" onClick={() => peerRef.current?.cancel()}>Cancel</Button>}
               {download ? (
                 <Button onClick={downloadFile}>

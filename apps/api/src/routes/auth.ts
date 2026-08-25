@@ -1,14 +1,26 @@
 import { z } from "zod";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { AppContext } from "../app.js";
 import { emailSchema, parse, passwordSchema, usernameSchema } from "../contracts.js";
-import { CSRF_COOKIE, issueCsrfToken, SESSION_COOKIE, sessionCookieOptions, requireUser } from "../plugins/auth.js";
+import { CSRF_COOKIE, csrfCookieOptions, issueCsrfToken, SESSION_COOKIE, sessionCookieOptions, requireUser } from "../plugins/auth.js";
 import { userIdentityResponse } from "../http.js";
 import { Readable } from "node:stream";
 import { ApiError } from "../lib/errors.js";
 
 const credentialsSchema = z.object({ email: emailSchema, password: passwordSchema });
 const signUpSchema = credentialsSchema.extend({ username: usernameSchema });
+
+function clearAuthCookie(reply: FastifyReply, name: string, options: NonNullable<Parameters<FastifyReply["clearCookie"]>[1]>) {
+  const { domain: _domain, maxAge: _maxAge, ...hostCookieOptions } = options;
+  const { maxAge: _domainMaxAge, ...domainCookieOptions } = options;
+
+  // Production sessions use a parent-domain cookie so both drive.uygarv.com
+  // and drive-api.uygarv.com can participate in the same authenticated session.
+  // A host-only clear does not delete that cookie. Clear both forms to also
+  // clean up sessions created before the domain-cookie migration.
+  reply.clearCookie(name, domainCookieOptions);
+  if ("domain" in options) reply.clearCookie(name, hostCookieOptions);
+}
 
 export async function registerAuthRoutes(app: FastifyInstance, context: AppContext) {
   app.get("/v1/auth/csrf", async (_request, reply) => ({ token: issueCsrfToken(reply, context.config) }));
@@ -40,8 +52,8 @@ export async function registerAuthRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.post("/v1/auth/sign-out", async (_request, reply) => {
-    reply.clearCookie(SESSION_COOKIE, { path: "/" });
-    reply.clearCookie(CSRF_COOKIE, { path: "/" });
+    clearAuthCookie(reply, SESSION_COOKIE, sessionCookieOptions(context.config));
+    clearAuthCookie(reply, CSRF_COOKIE, csrfCookieOptions(context.config));
     return reply.code(204).send();
   });
 

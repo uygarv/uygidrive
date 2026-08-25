@@ -105,10 +105,15 @@ export function ProfilePage() {
   const displayedUsername = usernameEdited ? username : profile?.username || "";
   const hasUsernameChange = usernameEdited && displayedUsername.trim().toLowerCase() !== (profile?.username || "").toLowerCase();
   const signOut = useCallback(async () => {
-    await driveApi.signOut();
-    queryClient.clear();
-    router.replace("/login");
-  }, [queryClient, router]);
+    try {
+      await driveApi.logout();
+      queryClient.clear();
+      // Do not reuse a prefetched authenticated route after clearing cookies.
+      window.location.replace("/");
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "Couldn’t sign out. Please try again.");
+    }
+  }, [queryClient]);
   const changeSection = useCallback((section) => {
     setIsMobileNavOpen(false);
     router.push(section === "trash" ? "/trash" : section === "shared" ? "/shared" : "/drive");

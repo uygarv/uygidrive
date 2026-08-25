@@ -705,8 +705,12 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   async function signOut() {
     try {
       await driveApi.logout();
-    } finally {
-      router.push("/");
+      queryClient.clear();
+      // A hard navigation deliberately avoids reusing a prefetched home page
+      // that was rendered while the session cookie still existed.
+      window.location.replace("/");
+    } catch (reason) {
+      toast.error(errorMessage(reason, "Couldn’t sign out. Please try again."));
     }
   }
   function navigate(path) {
