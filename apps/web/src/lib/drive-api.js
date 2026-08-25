@@ -180,6 +180,7 @@ function normalizeFile(file) {
     shareId: file.shareId || null,
     owner: file.owner || null,
     uploadedBy: file.uploadedBy || null,
+    canManageSharing: file.canManageSharing !== false,
     isShared: Boolean(file.isShared),
     hasActiveLink: Boolean(file.hasActiveLink),
     sharedRecipientCount: Number(file.sharedRecipientCount || 0),

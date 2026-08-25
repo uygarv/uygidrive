@@ -33,7 +33,7 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
       const uploadedBy = node.createdBy && node.createdBy !== node.ownerId
         ? userIdentityResponse((await context.repository.getUser(node.createdBy)) ?? { id: node.createdBy, username: null, avatarVersion: null })
         : null;
-      return { ...nodeResponse(node), ...shareStatus, isShared: shareStatus.hasActiveLink || shareStatus.sharedRecipientCount > 0, uploadedBy };
+      return { ...nodeResponse(node), ...shareStatus, isShared: shareStatus.hasActiveLink || shareStatus.sharedRecipientCount > 0, uploadedBy, canManageSharing: context.drive.canManageSharing(user.uid, node) };
     }));
     return { items, nextCursor: result.nextCursor, breadcrumbs: result.breadcrumbs.map(nodeResponse), storage: { usedBytes: storage.storageUsedBytes, reservedBytes: storage.storageReservedBytes, limitBytes: storage.storageLimitBytes, usedDisplay: formatBytes(storage.storageUsedBytes), limitDisplay: formatBytes(storage.storageLimitBytes), percentUsed, isUnlimited: false, limitLabel: formatBytes(storage.storageLimitBytes) } };
   });
@@ -143,7 +143,7 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   app.get("/v1/shared", async (request) => {
     const user = await requireUser(request, context.firebase.auth);
     const page = await context.drive.listShared(user.uid);
-    return { items: await Promise.all(page.items.map(async (item) => ({ ...nodeResponse(item.node), sharedRole: item.role, sharedSource: item.source, shareId: item.shareId, owner: userIdentityResponse((await context.repository.getUser(item.node.ownerId)) ?? { id: item.node.ownerId, username: null, avatarVersion: null }), uploadedBy: item.node.createdBy && item.node.createdBy !== item.node.ownerId ? userIdentityResponse((await context.repository.getUser(item.node.createdBy)) ?? { id: item.node.createdBy, username: null, avatarVersion: null }) : null }))), nextCursor: page.nextCursor };
+    return { items: await Promise.all(page.items.map(async (item) => ({ ...nodeResponse(item.node), sharedRole: item.role, sharedSource: item.source, shareId: item.shareId, owner: userIdentityResponse((await context.repository.getUser(item.node.ownerId)) ?? { id: item.node.ownerId, username: null, avatarVersion: null }), uploadedBy: item.node.createdBy && item.node.createdBy !== item.node.ownerId ? userIdentityResponse((await context.repository.getUser(item.node.createdBy)) ?? { id: item.node.createdBy, username: null, avatarVersion: null }) : null, canManageSharing: context.drive.canManageSharing(user.uid, item.node) }))), nextCursor: page.nextCursor };
   });
 
   app.get("/v1/shared/:nodeId/children", async (request) => {
@@ -155,7 +155,7 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
     if (!node || node.kind !== "folder" || !access) throw new ApiError(404, "FOLDER_NOT_FOUND", "The shared folder is unavailable.");
     const page = await context.drive.list(node.ownerId, { parentId: nodeId, cursor: query.cursor, pageSize: query.pageSize ?? 25, sort: query.sort ?? "date:new-first", search: query.search });
     const owner = userIdentityResponse((await context.repository.getUser(node.ownerId)) ?? { id: node.ownerId, username: null, avatarVersion: null });
-    return { items: await Promise.all(page.items.map(async (item) => ({ ...nodeResponse(item), sharedRole: access.role, owner, uploadedBy: item.createdBy && item.createdBy !== item.ownerId ? userIdentityResponse((await context.repository.getUser(item.createdBy)) ?? { id: item.createdBy, username: null, avatarVersion: null }) : null }))), nextCursor: page.nextCursor, breadcrumbs: page.breadcrumbs.map(nodeResponse), role: access.role };
+    return { items: await Promise.all(page.items.map(async (item) => ({ ...nodeResponse(item), sharedRole: access.role, owner, uploadedBy: item.createdBy && item.createdBy !== item.ownerId ? userIdentityResponse((await context.repository.getUser(item.createdBy)) ?? { id: item.createdBy, username: null, avatarVersion: null }) : null, canManageSharing: context.drive.canManageSharing(user.uid, item) }))), nextCursor: page.nextCursor, breadcrumbs: page.breadcrumbs.map(nodeResponse), role: access.role };
   });
 
   app.get("/v1/users", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => {

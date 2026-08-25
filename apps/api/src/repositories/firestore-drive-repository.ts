@@ -570,6 +570,11 @@ export class FirestoreDriveRepository implements DriveRepository {
     return toShare(await ref.get());
   }
 
+  async getShare(shareId: string) {
+    const snapshot = await this.shareRef(shareId).get();
+    return snapshot.exists ? toShare(snapshot) : null;
+  }
+
   async listShares(ownerId: string, nodeId: string) {
     const snapshot = await this.firestore.collection(SHARES).where("ownerId", "==", ownerId).where("nodeId", "==", nodeId).orderBy("createdAt", "desc").get();
     return snapshot.docs.map(toShare);

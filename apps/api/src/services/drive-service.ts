@@ -67,7 +67,23 @@ export class DriveService {
   }
 
   restoreNode(ownerId: string, nodeId: string) { return this.repository.restoreNode(ownerId, nodeId); }
-  setNodeAccess(ownerId: string, nodeId: string, accessMode: AccessMode) { return this.repository.setNodeAccess(ownerId, nodeId, accessMode); }
+  private async assertCanManageSharing(ownerId: string, nodeId: string) {
+    const node = await this.repository.getNodeForOwner(ownerId, nodeId, ["active"]);
+    if (!node) throw new ApiError(404, "NOT_FOUND", "The item does not exist.");
+    if (node.createdBy && node.createdBy !== ownerId) {
+      throw new ApiError(403, "COLLABORATOR_UPLOAD_SHARING_RESTRICTED", "Files uploaded by collaborators inherit the folder’s access and can’t be shared separately.");
+    }
+    return node;
+  }
+
+  canManageSharing(ownerId: string, node: NodeRecord) {
+    return node.ownerId === ownerId && (!node.createdBy || node.createdBy === ownerId);
+  }
+
+  async setNodeAccess(ownerId: string, nodeId: string, accessMode: AccessMode) {
+    await this.assertCanManageSharing(ownerId, nodeId);
+    return this.repository.setNodeAccess(ownerId, nodeId, accessMode);
+  }
   findUsers(query: string) { return this.repository.findUsers(query); }
   async setAvatar(ownerId: string, source: Readable) { await this.storage.saveAvatar(ownerId, source); return this.repository.setAvatarVersion(ownerId, new Date().toISOString()); }
   async deleteAvatar(ownerId: string) { await this.storage.deleteAvatar(ownerId); return this.repository.setAvatarVersion(ownerId, null); }
@@ -210,10 +226,26 @@ export class DriveService {
   getRecipientAccess(userId: string, nodeId: string) { return this.repository.getRecipientAccess(userId, nodeId); }
   setFavorite(ownerId: string, nodeId: string, enabled: boolean) { return this.repository.setFavorite(ownerId, nodeId, enabled); }
   listShares(ownerId: string, nodeId: string) { return this.repository.listShares(ownerId, nodeId); }
-  createShare: DriveRepository["createShare"] = (input) => this.repository.createShare(input);
-  revokeShare(ownerId: string, shareId: string) { return this.repository.revokeShare(ownerId, shareId); }
-  revokePrivateLinks(ownerId: string, nodeId: string) { return this.repository.revokePrivateLinks(ownerId, nodeId); }
-  updateShareRole(ownerId: string, shareId: string, role: "viewer" | "editor") { return this.repository.updateShareRole(ownerId, shareId, role); }
+  async createShare(input: Parameters<DriveRepository["createShare"]>[0]) {
+    await this.assertCanManageSharing(input.ownerId, input.nodeId);
+    return this.repository.createShare(input);
+  }
+  async revokeShare(ownerId: string, shareId: string) {
+    const share = await this.repository.getShare(shareId);
+    if (!share || share.ownerId !== ownerId) throw new ApiError(404, "NOT_FOUND", "The share does not exist.");
+    await this.assertCanManageSharing(ownerId, share.nodeId);
+    return this.repository.revokeShare(ownerId, shareId);
+  }
+  async revokePrivateLinks(ownerId: string, nodeId: string) {
+    await this.assertCanManageSharing(ownerId, nodeId);
+    return this.repository.revokePrivateLinks(ownerId, nodeId);
+  }
+  async updateShareRole(ownerId: string, shareId: string, role: "viewer" | "editor") {
+    const share = await this.repository.getShare(shareId);
+    if (!share || share.ownerId !== ownerId) throw new ApiError(404, "NOT_FOUND", "The share does not exist.");
+    await this.assertCanManageSharing(ownerId, share.nodeId);
+    return this.repository.updateShareRole(ownerId, shareId, role);
+  }
   resolvePublicShare(publicId: string) { return this.repository.resolvePublicShare(publicId); }
   resolveTokenShare(tokenHash: string) { return this.repository.resolveTokenShare(tokenHash); }
   findPublicShare(nodeId: string) { return this.repository.findPublicShare(nodeId); }

@@ -564,6 +564,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
     queryClient.invalidateQueries({ queryKey: ["storage-usage"] });
   };
   const openShare = useCallback((file) => {
+    if (file.canManageSharing === false) return;
     window.clearTimeout(shareCloseTimer.current);
     setIsShareClosing(false);
     setShareFile(file);

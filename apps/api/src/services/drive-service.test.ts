@@ -71,6 +71,7 @@ test("empties every page of Trash and permanently removes stored files", async (
 test("revokes all private links for an owned item", async () => {
   let requested: { ownerId: string; nodeId: string } | null = null;
   const repository = {
+    getNodeForOwner: async () => file,
     revokePrivateLinks: async (ownerId: string, nodeId: string) => {
       requested = { ownerId, nodeId };
       return 2;
@@ -82,6 +83,26 @@ test("revokes all private links for an owned item", async () => {
 
   assert.deepEqual(requested, { ownerId: "user", nodeId: file.id });
   assert.equal(revoked, 2);
+});
+
+test("does not let a folder owner share a collaborator-uploaded file", async () => {
+  let shareCreated = false;
+  const collaboratorUpload: NodeRecord = { ...file, createdBy: "collaborator" };
+  const repository = {
+    getNodeForOwner: async () => collaboratorUpload,
+    createShare: async () => {
+      shareCreated = true;
+      return {};
+    },
+  } as unknown as DriveRepository;
+  const drive = new DriveService(repository, {} as StorageService, 60);
+
+  await assert.rejects(
+    drive.createShare({ id: "shr_123456789012", nodeId: file.id, ownerId: "user", mode: "recipient", linkTarget: "preview", publicId: null, tokenHash: null, recipientId: "recipient", role: "viewer", expiresAt: null }),
+    { code: "COLLABORATOR_UPLOAD_SHARING_RESTRICTED" },
+  );
+
+  assert.equal(shareCreated, false);
 });
 
 test("forwards an aligned upload chunk and persists Storage's acknowledged offset", async () => {

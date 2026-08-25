@@ -54,6 +54,7 @@ export interface DriveRepository {
   cancelUpload(ownerId: string, uploadId: string): Promise<UploadRecord | null>;
   listExpiredUploads(cutoff: Date, limit?: number): Promise<UploadRecord[]>;
   createShare(input: { id: string; nodeId: string; ownerId: string; mode: ShareMode; linkTarget: ShareRecord["linkTarget"]; publicId: string | null; tokenHash: string | null; recipientId: string | null; role: ShareRecord["role"]; expiresAt: Date | null }): Promise<ShareRecord>;
+  getShare(shareId: string): Promise<ShareRecord | null>;
   listShares(ownerId: string, nodeId: string): Promise<ShareRecord[]>;
   revokeShare(ownerId: string, shareId: string): Promise<void>;
   revokePrivateLinks(ownerId: string, nodeId: string): Promise<number>;

@@ -161,7 +161,7 @@ function FileThumbnail({ file, className, iconClassName, grid = false, contentUr
   );
 }
 
-function FileActions({ file, isTrash, readOnly, onDownload, onMove, onRename, onShare, onSendToDevice, onDelete, onRestore, className }) {
+function FileActions({ file, isTrash, readOnly, canShare = true, onDownload, onMove, onRename, onShare, onSendToDevice, onDelete, onRestore, className }) {
   return (
     <div className={className}>
       <DropdownMenu>
@@ -205,10 +205,10 @@ function FileActions({ file, isTrash, readOnly, onDownload, onMove, onRename, on
                   <DownloadIcon />
                   Download
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onShare(file)}>
+                {canShare && <DropdownMenuItem onClick={() => onShare(file)}>
                   <Share2Icon />
                   Share
-                </DropdownMenuItem>
+                </DropdownMenuItem>}
                 {onSendToDevice && <DropdownMenuItem onClick={() => onSendToDevice(file)}>
                   <SendIcon />
                   FileFly
@@ -228,10 +228,10 @@ function FileActions({ file, isTrash, readOnly, onDownload, onMove, onRename, on
         {file.type === "folder" && (
           <>
             <DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => onShare(file)}>
+              {canShare && <DropdownMenuItem onClick={() => onShare(file)}>
                 <Share2Icon />
                 Share
-              </DropdownMenuItem>
+              </DropdownMenuItem>}
               <DropdownMenuItem onClick={() => onMove(file)}>
                 <FolderInputIcon />
                 Move
@@ -557,6 +557,7 @@ export function FileBrowser({
               onRestore={onRestore}
               isTrash={isTrash}
               readOnly={readOnly}
+              canShare={file.canManageSharing}
               className={view === "grid" ? "absolute top-2 right-2" : undefined}
             />}
             {hideActions && getDownloadUrl && file.type === "file" && (
