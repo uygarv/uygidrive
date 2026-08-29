@@ -91,4 +91,6 @@ Configure the authenticated maintenance endpoint or `npm run purge:trash` as a t
 
 ## Contributing and security
 
-Contributions are welcomed. See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately through GitHub’s private vulnerability-reporting feature; see [SECURITY.md](SECURITY.md). The project is licensed under Apache-2.0; see [LICENSE](LICENSE).
+Contributions are welcomed. See [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities privately through GitHub’s private vulnerability-reporting feature; see [SECURITY.md](SECURITY.md). 
+
+This project is licensed under Apache-2.0, see [LICENSE](LICENSE).
