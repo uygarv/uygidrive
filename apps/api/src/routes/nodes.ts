@@ -14,7 +14,7 @@ const accessSchema = z.object({ accessMode: accessModeSchema });
 
 export async function registerNodeRoutes(app: FastifyInstance, context: AppContext) {
   app.get("/v1/nodes", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const query = parse(listSchema, request.query);
     const [result, storage] = await Promise.all([
       context.drive.list(user.uid, { parentId: query.parentId ?? null, cursor: query.cursor, pageSize: query.pageSize ?? 25, sort: query.sort ?? "date:new-first", search: query.search }),
@@ -39,14 +39,14 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.post("/v1/folders", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const body = parse(createFolderSchema, request.body);
     const node = await context.drive.createFolder(user.uid, body.parentId ?? null, body.name);
     return reply.code(201).send({ item: nodeResponse(node) });
   });
 
   app.get("/v1/nodes/:nodeId", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const node = await context.drive.getNodeForOwner(user.uid, nodeId);
     if (!node) throw new ApiError(404, "NOT_FOUND", "The item does not exist.");
@@ -54,21 +54,21 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.patch("/v1/nodes/:nodeId/access", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const body = parse(accessSchema, request.body);
     return { item: nodeResponse(await context.drive.setNodeAccess(user.uid, nodeId, body.accessMode)) };
   });
 
   app.patch("/v1/nodes/:nodeId", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const body = parse(patchSchema, request.body);
     return { item: nodeResponse(await context.drive.updateNode(user.uid, nodeId, body)) };
   });
 
   app.delete("/v1/nodes/:nodeId", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const query = parse(z.object({ permanent: z.coerce.boolean().default(false) }), request.query);
     const permanent = query.permanent ?? false;
@@ -77,13 +77,13 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.post("/v1/nodes/:nodeId/restore", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     return { item: nodeResponse(await context.drive.restoreNode(user.uid, nodeId)) };
   });
 
   async function getReadableNode(request: FastifyRequest) {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const node = await context.drive.getNode(nodeId);
     const access = node ? await context.drive.getRecipientAccess(user.uid, nodeId) : null;
@@ -113,7 +113,7 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.get("/v1/storage", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const storage = await context.drive.getStorage(user.uid);
     if (!storage) throw new ApiError(404, "STORAGE_NOT_FOUND", "Storage profile is unavailable.");
     const percentUsed = Math.min(100, Math.round((storage.storageUsedBytes / storage.storageLimitBytes) * 100));
@@ -121,33 +121,33 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.put("/v1/nodes/:nodeId/favorite", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     await context.drive.setFavorite(user.uid, nodeId, true);
     return reply.code(204).send();
   });
 
   app.delete("/v1/nodes/:nodeId/favorite", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     await context.drive.setFavorite(user.uid, nodeId, false);
     return reply.code(204).send();
   });
 
   app.get("/v1/favorites", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const page = await context.drive.listFavorites(user.uid);
     return { items: page.items.map(nodeResponse), nextCursor: page.nextCursor };
   });
 
   app.get("/v1/shared", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const page = await context.drive.listShared(user.uid);
     return { items: await Promise.all(page.items.map(async (item) => ({ ...nodeResponse(item.node), sharedRole: item.role, sharedSource: item.source, shareId: item.shareId, owner: userIdentityResponse((await context.repository.getUser(item.node.ownerId)) ?? { id: item.node.ownerId, username: null, avatarVersion: null }), uploadedBy: item.node.createdBy && item.node.createdBy !== item.node.ownerId ? userIdentityResponse((await context.repository.getUser(item.node.createdBy)) ?? { id: item.node.createdBy, username: null, avatarVersion: null }) : null, canManageSharing: context.drive.canManageSharing(user.uid, item.node) }))), nextCursor: page.nextCursor };
   });
 
   app.get("/v1/shared/:nodeId/children", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const query = parse(listSchema, request.query);
     const node = await context.drive.getNode(nodeId);
@@ -159,20 +159,20 @@ export async function registerNodeRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.get("/v1/users", { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } }, async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { query } = parse(z.object({ query: z.string().trim().min(2).max(120) }), request.query);
     return { users: (await context.drive.findUsers(query.toLowerCase())).filter((candidate) => candidate.id !== user.uid).map(userIdentityResponse) };
   });
 
   app.get("/v1/trash", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const query = parse(trashQuerySchema, request.query);
     const page = await context.drive.listTrash(user.uid, query.cursor, query.pageSize);
     return { items: page.items.map(nodeResponse), nextCursor: page.nextCursor };
   });
 
   app.delete("/v1/trash", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     return context.drive.emptyTrash(user.uid);
   });
 }

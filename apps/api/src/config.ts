@@ -5,8 +5,13 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   WEB_ORIGIN: z.string().default("http://localhost:3000"),
   FIREBASE_SERVICE_ACCOUNT: z.string().min(1),
-  FIREBASE_STORAGE_BUCKET: z.string().min(1).default("uygidrive.appspot.com"),
+  FIREBASE_STORAGE_BUCKET: z.string().min(1),
   FIREBASE_WEB_API_KEY: z.string().min(1),
+  // Omitted means an existing UygiDrive production deployment; an explicit
+  // empty value opts a new deployment into host-only cookies.
+  COOKIE_DOMAIN: z.string().trim().optional(),
+  SESSION_COOKIE_NAME: z.string().min(1).max(128).default("uygidrive_session"),
+  CSRF_COOKIE_NAME: z.string().min(1).max(128).default("uygidrive_csrf"),
   LEGACY_SHARE_TOKEN_SECRET: z.string().min(1).optional(),
   DEFAULT_STORAGE_LIMIT_BYTES: z.coerce.number().int().positive().default(2 * 1024 * 1024 * 1024),
   UPLOAD_INTENT_TTL_MINUTES: z.coerce.number().int().positive().max(7 * 24 * 60).default(7 * 24 * 60),
@@ -25,6 +30,9 @@ export type AppConfig = {
   firebaseServiceAccount: Record<string, unknown>;
   firebaseStorageBucket: string;
   firebaseWebApiKey: string;
+  cookieDomain: string | null;
+  sessionCookieName: string;
+  csrfCookieName: string;
   legacyShareTokenSecret: string | null;
   defaultStorageLimitBytes: number;
   uploadIntentTtlMinutes: number;
@@ -58,6 +66,11 @@ export function loadConfig(environment = process.env): AppConfig {
     firebaseServiceAccount: decodeServiceAccount(parsed.FIREBASE_SERVICE_ACCOUNT),
     firebaseStorageBucket: parsed.FIREBASE_STORAGE_BUCKET,
     firebaseWebApiKey: parsed.FIREBASE_WEB_API_KEY,
+    cookieDomain: parsed.COOKIE_DOMAIN === undefined
+      ? parsed.NODE_ENV === "production" ? ".uygarv.com" : null
+      : parsed.COOKIE_DOMAIN || null,
+    sessionCookieName: parsed.SESSION_COOKIE_NAME,
+    csrfCookieName: parsed.CSRF_COOKIE_NAME,
     legacyShareTokenSecret: parsed.LEGACY_SHARE_TOKEN_SECRET ?? null,
     defaultStorageLimitBytes: parsed.DEFAULT_STORAGE_LIMIT_BYTES,
     uploadIntentTtlMinutes: parsed.UPLOAD_INTENT_TTL_MINUTES,

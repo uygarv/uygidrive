@@ -23,7 +23,7 @@ function receiverToken(request: FastifyRequest) {
 async function actorFor(request: FastifyRequest, context: AppContext, transferId: string): Promise<{ actor: "sender" | "receiver"; transfer: DeviceTransferRecord }> {
   const capability = receiverToken(request);
   if (capability) return { actor: "receiver", transfer: await context.deviceTransfers.receiver(transferId, capability) };
-  const user = await requireUser(request, context.firebase.auth);
+  const user = await requireUser(request, context.firebase.auth, context.config);
   return { actor: "sender", transfer: await context.deviceTransfers.sender(transferId, user.uid) };
 }
 
@@ -33,7 +33,7 @@ function transferResponse(transfer: DeviceTransferRecord) {
 
 export async function registerDeviceTransferRoutes(app: FastifyInstance, context: AppContext) {
   app.post("/v1/device-transfers", { config: { rateLimit: { max: 20, timeWindow: "1 hour" } } }, async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const body = parse(createSchema, request.body);
     let input: { source: "drive" | "local"; driveNodeId: string | null; name: string; contentType: string | null; sizeBytes: number };
     if (body.source === "drive") {
@@ -57,13 +57,13 @@ export async function registerDeviceTransferRoutes(app: FastifyInstance, context
   });
 
   app.get("/v1/device-transfers/available", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     return { transfers: await context.deviceTransfers.availableForOwner(user.uid) };
   });
 
   app.post("/v1/device-transfers/:transferId/join-own", { config: { rateLimit: { max: 12, timeWindow: "1 minute" } } }, async (request, reply) => {
     const { transferId } = parse(z.object({ transferId: idSchema }), request.params);
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const result = await context.deviceTransfers.joinOwnTransfer({ id: transferId, ownerId: user.uid, receiverToken: DeviceTransferService.receiverToken() });
     return reply.code(201).send(result);
   });

@@ -1,7 +1,24 @@
 # dependencies
 /node_modules
-/.env
+**/node_modules/
+**/.env
+**/.env.local
+**/.env.*.local
 .DS_Store
+*.pem
+*.key
+*.p12
+coverage/
+dist/
+build/
+.next/
+.vercel/
+.idea/
+.vscode/
+.history/
+.bash_history
+.node_repl_history
+.config/
 
 AGENTS.md
 CLAUDE.md

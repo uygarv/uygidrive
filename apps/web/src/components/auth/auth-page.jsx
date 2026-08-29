@@ -13,6 +13,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { driveApi } from "@/lib/drive-api";
+import { brand } from "@/config/brand";
 
 export function AuthPage({ mode }) {
   const [isPending, setIsPending] = useState(false);
@@ -53,7 +54,7 @@ export function AuthPage({ mode }) {
                 {!isLogin && <Field data-invalid={Boolean(error)}><FieldLabel htmlFor="username">Username</FieldLabel><Input id="username" name="username" autoComplete="username" placeholder="your_name" minLength={3} maxLength={20} pattern="[a-z0-9_]{3,20}" required aria-invalid={Boolean(error)} onChange={(event) => { event.currentTarget.value = event.currentTarget.value.toLowerCase().replace(/[^a-z0-9_]/g, ""); }} /><FieldDescription>Your unique @username uses 3–20 lowercase letters, numbers, or underscores.</FieldDescription></Field>}
                 <Field data-invalid={Boolean(error)}><FieldLabel htmlFor="password">Password</FieldLabel><Input id="password" name="password" type="password" autoComplete={isLogin ? "current-password" : "new-password"} minLength={6} required aria-invalid={Boolean(error)} /><FieldDescription>Password must be at least 6 characters.</FieldDescription></Field>
                 {error && <FieldError>{error}</FieldError>}
-                <Field><Button type="submit" size="lg" disabled={isPending}>{isPending && <Spinner data-icon="inline-start" />}{isLogin ? "Sign in" : "Create account"}<ArrowRightIcon data-icon="inline-end" /></Button><FieldDescription className="text-center">{isLogin ? "New to UygiDrive?" : "Already have an account?"} <Link href={isLogin ? "/signup" : "/login"}> {isLogin ? "Create an account" : "Sign in"}</Link></FieldDescription></Field>
+                <Field><Button type="submit" size="lg" disabled={isPending}>{isPending && <Spinner data-icon="inline-start" />}{isLogin ? "Sign in" : "Create account"}<ArrowRightIcon data-icon="inline-end" /></Button><FieldDescription className="text-center">{isLogin ? `New to ${brand.name}?` : "Already have an account?"} <Link href={isLogin ? "/signup" : "/login"}> {isLogin ? "Create an account" : "Sign in"}</Link></FieldDescription></Field>
               </FieldGroup>
             </form>
           </CardContent></Card>

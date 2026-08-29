@@ -24,21 +24,21 @@ function parseContentRange(value: string | string[] | undefined) {
 
 export async function registerUploadRoutes(app: FastifyInstance, context: AppContext) {
   app.post("/v1/uploads", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const body = parse(createUploadSchema, request.body);
     const upload = await context.drive.createUpload(user.uid, { parentId: body.parentId ?? null, name: body.name, contentType: body.contentType ?? null, sizeBytes: body.sizeBytes });
     return reply.code(201).send({ upload: { id: upload.id, nodeId: upload.nodeId, expiresAt: upload.expiresAt.toISOString() } });
   });
 
   app.get("/v1/uploads", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const uploads = await context.drive.listOpenUploads(user.uid);
     return { uploads: uploads.filter((upload) => ["pending", "streaming"].includes(upload.status)).map((upload) => ({ id: upload.id, parentId: upload.parentId, name: upload.name, contentType: upload.contentType, expectedBytes: upload.expectedBytes, receivedBytes: upload.receivedBytes, status: upload.status, expiresAt: upload.expiresAt.toISOString() })) };
   });
 
   // Leave room above the raw 16 MiB body for Fastify's request accounting.
   app.put("/v1/uploads/:uploadId/chunk", { bodyLimit: UPLOAD_CHUNK_BYTES + 1024 * 1024, config: { rateLimit: false } }, async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { uploadId } = parse(z.object({ uploadId: idSchema }), request.params);
     const range = parseContentRange(request.headers["content-range"]);
     const contentLength = Number(request.headers["content-length"]);
@@ -50,7 +50,7 @@ export async function registerUploadRoutes(app: FastifyInstance, context: AppCon
   });
 
   app.get("/v1/uploads/:uploadId", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { uploadId } = parse(z.object({ uploadId: idSchema }), request.params);
     const upload = await context.drive.getUpload(user.uid, uploadId);
     if (!upload) throw new ApiError(404, "UPLOAD_NOT_FOUND", "The upload does not exist.");
@@ -58,7 +58,7 @@ export async function registerUploadRoutes(app: FastifyInstance, context: AppCon
   });
 
   app.delete("/v1/uploads/:uploadId", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { uploadId } = parse(z.object({ uploadId: idSchema }), request.params);
     await context.drive.cancelUpload(user.uid, uploadId);
     return reply.code(204).send();

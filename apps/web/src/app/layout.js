@@ -1,11 +1,12 @@
 import "./globals.css";
 import { Providers } from "@/app/providers";
+import { brand } from "@/config/brand";
 
 export const metadata = {
-  title: "UygiDrive | Simpliest access to your files",
-  description: "A capable place to store and share your files.",
+  title: `${brand.name} | ${brand.tagline}`,
+  description: brand.description,
   icons: {
-    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    icon: [{ url: brand.logoPath, type: "image/svg+xml" }],
   },
 };
 

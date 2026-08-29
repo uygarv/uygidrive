@@ -87,6 +87,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { driveApi } from "@/lib/drive-api";
 import { previewKind } from "@/lib/drive-utils";
 import { cn } from "@/lib/utils";
+import { brand } from "@/config/brand";
 import { IdentityAvatar } from "@/components/identity-avatar";
 
 function fileExtension(name) {
@@ -636,10 +637,10 @@ function ShareContent({ file, currentUserId, onClose }) {
             <FieldDescription>{visibility === "public" ? "Choose a public link that never expires or a private expiring link." : "Private links always expire."}</FieldDescription>
             <div className="mt-3 flex min-w-0">
               <Select value={linkExpiry} onValueChange={setLinkExpiry}><SelectTrigger className={cn("h-9 flex-1", file.type === "file" && "rounded-r-none border-r-0")} aria-label="Link expiration"><span>{{ never: "Never expires", "1h": "1 hour", "1d": "1 day", "7d": "7 days", "30d": "30 days" }[linkExpiry]}</span></SelectTrigger><SelectContent><SelectGroup>{visibility === "public" && <SelectItem value="never">Never expires</SelectItem>}<SelectItem value="1h">1 hour</SelectItem><SelectItem value="1d">1 day</SelectItem><SelectItem value="7d">7 days</SelectItem><SelectItem value="30d">30 days</SelectItem></SelectGroup></SelectContent></Select>
-              {file.type === "file" && <Select value={linkTarget} onValueChange={setLinkTarget}><SelectTrigger className="h-9 flex-1 rounded-l-none" aria-label="Link destination"><span>{linkTarget === "content" ? "File content" : "UygiDrive preview"}</span></SelectTrigger><SelectContent><SelectGroup><SelectItem value="preview">UygiDrive preview</SelectItem><SelectItem value="content">File content</SelectItem></SelectGroup></SelectContent></Select>}
+              {file.type === "file" && <Select value={linkTarget} onValueChange={setLinkTarget}><SelectTrigger className="h-9 flex-1 rounded-l-none" aria-label="Link destination"><span>{linkTarget === "content" ? "File content" : `${brand.name} preview`}</span></SelectTrigger><SelectContent><SelectGroup><SelectItem value="preview">{`${brand.name} preview`}</SelectItem><SelectItem value="content">File content</SelectItem></SelectGroup></SelectContent></Select>}
             </div>
             <Button type="button" className="mt-2 w-full" onClick={createLink} disabled={isGenerating}>{isGenerating ? <Spinner data-icon="inline-start" /> : <LinkIcon data-icon="inline-start" />}Create link</Button>
-            {file.type === "file" && <p className="mt-1.5 text-xs text-muted-foreground">{linkTarget === "content" ? "Opens the file directly through a UygiDrive URL." : "Opens the UygiDrive share preview."}</p>}
+            {file.type === "file" && <p className="mt-1.5 text-xs text-muted-foreground">{linkTarget === "content" ? `Opens the file directly through a ${brand.name} URL.` : `Opens the ${brand.name} share preview.`}</p>}
             {createdLink?.url && <InputGroup className="mt-3"><InputGroupInput value={createdLink.url} readOnly /><InputGroupAddon align="inline-end"><InputGroupButton size="icon-xs" onClick={() => copy(createdLink.url)} aria-label="Copy share link"><CopyIcon /></InputGroupButton></InputGroupAddon></InputGroup>}
             {privateLinkCount > 0 && <Button type="button" variant="outline" className="mt-3 w-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setIsInvalidatePrivateLinksOpen(true)}>Invalidate all private links</Button>}
           </Field>

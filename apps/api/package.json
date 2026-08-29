@@ -1,6 +1,7 @@
 {
-  "name": "@uygidrive/api",
+  "name": "@self-hosted-drive/api",
   "version": "0.1.0",
+  "description": "Fastify API for the self-hosted drive web application.",
   "private": true,
   "type": "module",
   "scripts": {

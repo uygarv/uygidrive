@@ -7,6 +7,7 @@ import { Brand } from "@/components/brand";
 import { ThemeMenu } from "@/components/theme-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { brand } from "@/config/brand";
 
 const features = [
   [UploadCloudIcon, "Upload without friction", "Drop files into your drive, track their progress, and keep working while transfers finish."],
@@ -65,8 +66,8 @@ export function MarketingHome({ hasSession }) {
           <motion.div initial={{ opacity: 0, y: reduceMotion ? 0 : 12 }} animate={{ opacity: 1, y: 0 }} transition={transition} className="relative isolate flex flex-col gap-7 py-10">
             <motion.div aria-hidden="true" className="pointer-events-none absolute -left-48 -top-52 z-0 size-[34rem] [transform-style:preserve-3d] sm:-left-56 sm:-top-56 sm:size-[40rem]" style={reduceMotion ? undefined : { y: cloudY, rotateX: cloudTilt, rotateY: cloudTurn, transformPerspective: 1000 }}><CloudIcon className="size-full -rotate-[18deg] stroke-1 text-primary/[0.055]" /></motion.div>
             <div className="relative z-10 flex flex-col gap-5">
-              <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">Simpliest access to your files.</h1>
-              <p className="max-w-xl text-lg leading-8 text-muted-foreground">UygiDrive is a boutique place to store your files in the easiest way possible.</p>
+              <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl">{brand.tagline}</h1>
+              <p className="max-w-xl text-lg leading-8 text-muted-foreground">{brand.marketingDescription}</p>
             </div>
             <div className="relative z-10 flex flex-wrap gap-3"><SessionActions hasSession={hasSession} placement="hero" transition={transition} /><Button nativeButton={false} size="lg" variant="outline" render={<Link href="/receive" />}>Receive FileFly</Button></div>
             <div className="relative z-10 flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">

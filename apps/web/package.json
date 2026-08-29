@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:demo": "node scripts/dev-demo.mjs",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",

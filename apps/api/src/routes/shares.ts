@@ -26,14 +26,14 @@ function shareResponse(share: { id: string; mode: string; linkTarget: "preview" 
 
 export async function registerShareRoutes(app: FastifyInstance, context: AppContext) {
   app.get("/v1/nodes/:nodeId/shares", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const shares = await context.drive.listShares(user.uid, nodeId);
     return { shares: await Promise.all(shares.map(async (share) => ({ ...shareResponse(share, context.config.webOrigins[0]!), recipient: share.recipientId ? userIdentityResponse((await context.repository.getUser(share.recipientId)) ?? { id: share.recipientId, username: null, avatarVersion: null }) : null }))) };
   });
 
   app.post("/v1/nodes/:nodeId/shares", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     const body = parse(createShareSchema, request.body);
     if (body.mode === "recipient" && body.recipientId === user.uid) {
@@ -47,20 +47,20 @@ export async function registerShareRoutes(app: FastifyInstance, context: AppCont
   });
 
   app.delete("/v1/shares/:shareId", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { shareId } = parse(z.object({ shareId: idSchema }), request.params);
     await context.drive.revokeShare(user.uid, shareId);
     return reply.code(204).send();
   });
 
   app.delete("/v1/nodes/:nodeId/private-links", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { nodeId } = parse(z.object({ nodeId: idSchema }), request.params);
     return parse(revokePrivateLinksResponseSchema, { revoked: await context.drive.revokePrivateLinks(user.uid, nodeId) });
   });
 
   app.patch("/v1/shares/:shareId", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { shareId } = parse(z.object({ shareId: idSchema }), request.params);
     const { role } = parse(z.object({ role: z.enum(["viewer", "editor"]) }), request.body);
     const share = await context.drive.updateShareRole(user.uid, shareId, role);
@@ -116,7 +116,7 @@ export async function registerShareRoutes(app: FastifyInstance, context: AppCont
   });
 
   app.post("/v1/public/:publicId/open", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { publicId } = parse(z.object({ publicId: idSchema }), request.params);
     const share = await context.drive.resolvePublicShare(publicId);
     if (!share || share.mode !== "public") throw new ApiError(404, "SHARE_NOT_FOUND", "This public link is unavailable.");
@@ -127,7 +127,7 @@ export async function registerShareRoutes(app: FastifyInstance, context: AppCont
   });
 
   app.post("/v1/s/:token/open", async (request, reply) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { token } = parse(z.object({ token: z.string().min(32).max(200) }), request.params);
     const share = await context.drive.resolveTokenShare(hashToken(token));
     if (!share || share.mode !== "link") throw new ApiError(404, "SHARE_NOT_FOUND", "This private link is unavailable.");

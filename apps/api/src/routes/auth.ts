@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { AppContext } from "../app.js";
 import { emailSchema, parse, passwordSchema, usernameSchema } from "../contracts.js";
-import { CSRF_COOKIE, csrfCookieOptions, issueCsrfToken, SESSION_COOKIE, sessionCookieOptions, requireUser } from "../plugins/auth.js";
+import { csrfCookieOptions, issueCsrfToken, sessionCookieOptions, requireUser } from "../plugins/auth.js";
 import { userIdentityResponse } from "../http.js";
 import { Readable } from "node:stream";
 import { ApiError } from "../lib/errors.js";
@@ -14,10 +14,8 @@ function clearAuthCookie(reply: FastifyReply, name: string, options: NonNullable
   const { domain: _domain, maxAge: _maxAge, ...hostCookieOptions } = options;
   const { maxAge: _domainMaxAge, ...domainCookieOptions } = options;
 
-  // Production sessions use a parent-domain cookie so both drive.uygarv.com
-  // and drive-api.uygarv.com can participate in the same authenticated session.
-  // A host-only clear does not delete that cookie. Clear both forms to also
-  // clean up sessions created before the domain-cookie migration.
+  // Clear both domain and host-only forms when a configured cookie domain is
+  // used, so deployments can safely change cookie scope during a rollout.
   reply.clearCookie(name, domainCookieOptions);
   if ("domain" in options) reply.clearCookie(name, hostCookieOptions);
 }
@@ -39,7 +37,7 @@ export async function registerAuthRoutes(app: FastifyInstance, context: AppConte
       ]);
       throw error;
     }
-    reply.setCookie(SESSION_COOKIE, session.sessionCookie, sessionCookieOptions(context.config));
+    reply.setCookie(context.config.sessionCookieName, session.sessionCookie, sessionCookieOptions(context.config));
     return reply.code(201).send({ user: { ...userIdentityResponse(profile), needsUsername: false } });
   });
 
@@ -47,37 +45,37 @@ export async function registerAuthRoutes(app: FastifyInstance, context: AppConte
     const body = parse(credentialsSchema, request.body);
     const session = await context.authService.signIn(body.email, body.password);
     const profile = await context.repository.ensureUser(session.uid, session.email);
-    reply.setCookie(SESSION_COOKIE, session.sessionCookie, sessionCookieOptions(context.config));
+    reply.setCookie(context.config.sessionCookieName, session.sessionCookie, sessionCookieOptions(context.config));
     return { user: { ...userIdentityResponse(profile), needsUsername: !profile.username } };
   });
 
   app.post("/v1/auth/sign-out", async (_request, reply) => {
-    clearAuthCookie(reply, SESSION_COOKIE, sessionCookieOptions(context.config));
-    clearAuthCookie(reply, CSRF_COOKIE, csrfCookieOptions(context.config));
+    clearAuthCookie(reply, context.config.sessionCookieName, sessionCookieOptions(context.config));
+    clearAuthCookie(reply, context.config.csrfCookieName, csrfCookieOptions(context.config));
     return reply.code(204).send();
   });
 
   app.get("/v1/auth/session", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const profile = await context.repository.ensureUser(user.uid, user.email);
     return { user: { ...userIdentityResponse(profile), email: profile.email, needsUsername: !profile.username }, storage: { usedBytes: profile.storageUsedBytes, reservedBytes: profile.storageReservedBytes, limitBytes: profile.storageLimitBytes } };
   });
 
   app.get("/v1/profile", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const profile = await context.repository.ensureUser(user.uid, user.email);
     return { profile: { ...userIdentityResponse(profile), email: profile.email } };
   });
 
   app.patch("/v1/profile", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const { username } = parse(z.object({ username: usernameSchema }), request.body);
     const profile = await context.repository.setUsername(user.uid, username);
     return { profile: { ...userIdentityResponse(profile), email: profile.email } };
   });
 
   app.put("/v1/profile/avatar", { bodyLimit: 10 * 1024 * 1024 }, async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const source = request.body;
     if (!source || typeof (source as Readable).pipe !== "function") throw new ApiError(415, "INVALID_AVATAR", "Profile photo must be an image stream.");
     const profile = await context.drive.setAvatar(user.uid, source as Readable);
@@ -85,13 +83,13 @@ export async function registerAuthRoutes(app: FastifyInstance, context: AppConte
   });
 
   app.delete("/v1/profile/avatar", async (request) => {
-    const user = await requireUser(request, context.firebase.auth);
+    const user = await requireUser(request, context.firebase.auth, context.config);
     const profile = await context.drive.deleteAvatar(user.uid);
     return { profile: { ...userIdentityResponse(profile), email: profile.email } };
   });
 
   app.get("/v1/users/:userId/avatar", async (request, reply) => {
-    await requireUser(request, context.firebase.auth);
+    await requireUser(request, context.firebase.auth, context.config);
     const { userId } = parse(z.object({ userId: z.string().min(1).max(128) }), request.params);
     const stream = await context.drive.streamAvatar(userId);
     if (!stream) return reply.code(404).send();

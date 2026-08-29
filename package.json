@@ -14,12 +14,15 @@
   },
   "scripts": {
     "start": "node legacy-api/index.js",
-    "init-storage-metadata": "node api/scripts/initStorageMetadata.js"
+    "start:legacy": "node legacy-api/index.js",
+    "test:legacy": "node --test legacy-api/storageQuota.test.js",
+    "init-storage-metadata:legacy": "node legacy-api/scripts/initStorageMetadata.js"
   },
-  "name": "uygidrive",
+  "name": "self-hosted-drive-legacy-reference",
   "version": "0.0.3",
-  "description": "a express.js server with for cloud storage service",
-  "main": "api/index.js",
+  "description": "Unsupported legacy migration reference for the self-hosted drive apps.",
+  "private": true,
+  "main": "legacy-api/index.js",
   "devDependencies": {
     "uglify-js": "^3.17.4"
   },
@@ -29,5 +32,5 @@
   "keywords": [
     "node"
   ],
-  "author": "Uygi"
+  "author": ""
 }

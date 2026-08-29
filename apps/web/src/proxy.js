@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const SESSION_COOKIE = "uygidrive_session";
+const SESSION_COOKIE = process.env.NEXT_PUBLIC_SESSION_COOKIE_NAME || "uygidrive_session";
 
 /**
  * Next 16 renamed Middleware to Proxy. This is deliberately a fast cookie

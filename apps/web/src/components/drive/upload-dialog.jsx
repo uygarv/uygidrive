@@ -10,8 +10,9 @@ import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 import { driveApi } from "@/lib/drive-api";
 import { cn } from "@/lib/utils";
+import { brand } from "@/config/brand";
 
-const UPLOAD_QUEUE_STORAGE_KEY = "uygidrive.pending-uploads.v1";
+const UPLOAD_QUEUE_STORAGE_KEY = `${brand.namespace}.pending-uploads.v1`;
 
 function clientUploadId() {
   const cryptoApi = globalThis.crypto;

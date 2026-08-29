@@ -15,7 +15,9 @@ async function main() {
   const serviceAccount = parseServiceAccount();
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    storageBucket: 'gs://uygidrive.appspot.com',
+    // Compatibility fallback for the original deployment; new operators set
+    // FIREBASE_STORAGE_BUCKET explicitly.
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'gs://uygidrive.appspot.com',
   });
 
   const bucket = admin.storage().bucket();

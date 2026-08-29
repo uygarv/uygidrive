@@ -49,6 +49,6 @@ export function mockDriveList({ parentId = null, search = "", sort = "date:new-f
 }
 
 export const mockSession = {
-  user: { id: "mock-user", username: "uygidrive", needsUsername: false },
+  user: { id: "mock-user", username: "demo_user", needsUsername: false },
   storage,
 };

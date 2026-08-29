@@ -12,6 +12,9 @@ const config: AppConfig = {
   firebaseServiceAccount: {},
   firebaseStorageBucket: "test-bucket",
   firebaseWebApiKey: "test-key",
+  cookieDomain: null,
+  sessionCookieName: "uygidrive_session",
+  csrfCookieName: "uygidrive_csrf",
   legacyShareTokenSecret: null,
   defaultStorageLimitBytes: 2 * 1024 * 1024 * 1024,
   uploadIntentTtlMinutes: 60,
@@ -37,7 +40,20 @@ test("serves health and issues a CSRF token without Firebase access", async (con
   const csrf = await app.inject({ method: "GET", url: "/v1/auth/csrf", headers: { origin: "http://localhost:3000" } });
   assert.equal(csrf.statusCode, 200);
   assert.equal(typeof csrf.json().token, "string");
-  assert.match(Array.isArray(csrf.headers["set-cookie"]) ? csrf.headers["set-cookie"].join(";") : csrf.headers["set-cookie"] ?? "", /uygidrive_csrf=/);
+  const cookies = Array.isArray(csrf.headers["set-cookie"]) ? csrf.headers["set-cookie"].join(";") : csrf.headers["set-cookie"] ?? "";
+  assert.match(cookies, /uygidrive_csrf=/);
+  assert.doesNotMatch(cookies, /Domain=/);
+});
+
+test("uses configured cookie names and an optional parent domain", async (context) => {
+  const app = await testApp({ cookieDomain: ".example.test", sessionCookieName: "fork_session", csrfCookieName: "fork_csrf" });
+  context.after(() => app.close());
+
+  const csrf = await app.inject({ method: "GET", url: "/v1/auth/csrf", headers: { origin: "http://localhost:3000" } });
+  assert.equal(csrf.statusCode, 200);
+  const cookies = Array.isArray(csrf.headers["set-cookie"]) ? csrf.headers["set-cookie"].join(";") : csrf.headers["set-cookie"] ?? "";
+  assert.match(cookies, /fork_csrf=/);
+  assert.match(cookies, /Domain=\.example\.test/);
 });
 
 test("rejects protected API calls without a session", async (context) => {

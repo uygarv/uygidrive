@@ -120,7 +120,8 @@ function getMemoryUsage() {
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  storageBucket: "gs://uygidrive.appspot.com"
+  // Keep the deployed legacy application working until migration completes.
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "gs://uygidrive.appspot.com"
 });
 const bucket = admin.storage().bucket();
 

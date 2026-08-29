@@ -1,10 +1,12 @@
 const API_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "https://drive-api.uygarv.com";
+  "http://localhost:4000";
 
 const WEB_URL =
   process.env.NEXT_PUBLIC_WEB_BASE_URL ||
-  "https://drive.uygarv.com";
+  "http://localhost:3000";
+
+import { brand, brandTitle } from "@/config/brand";
 
 function sharePaths(type, accessId) {
   const encoded = encodeURIComponent(accessId);
@@ -53,7 +55,7 @@ export async function generateShareMetadata(type, accessId) {
 
   if (!data?.item) {
     return {
-      title: "Shared file | UygiDrive",
+      title: brandTitle("Shared file"),
       description: "This shared file is unavailable.",
       robots: {
         index: false,
@@ -66,8 +68,8 @@ export async function generateShareMetadata(type, accessId) {
   const kind = mediaType(file.contentType);
 
   const metadata = {
-    title: `${file.name} | UygiDrive`,
-    description: `${file.name} — shared via UygiDrive`,
+    title: brandTitle(file.name),
+    description: `${file.name} — shared via ${brand.name}`,
 
     alternates: {
       canonical: paths.page,
@@ -75,15 +77,15 @@ export async function generateShareMetadata(type, accessId) {
 
     openGraph: {
       title: file.name,
-      description: "Shared via UygiDrive",
+      description: `Shared via ${brand.name}`,
       url: paths.page,
-      siteName: "UygiDrive",
+      siteName: brand.name,
       type: "website",
     },
 
     twitter: {
       title: file.name,
-      description: "Shared via UygiDrive",
+      description: `Shared via ${brand.name}`,
     },
 
     robots:

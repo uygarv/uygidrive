@@ -1,4 +1,5 @@
 import { driveApi } from "@/lib/drive-api";
+import { brand } from "@/config/brand";
 
 const DEFAULT_CHUNK_BYTES = 64 * 1024;
 // Keep individual SCTP messages comfortably below the commonly supported
@@ -12,6 +13,7 @@ const DISCONNECT_GRACE_MS = 30_000;
 const ICE_RESTART_DELAY_MS = 1_500;
 const PROGRESS_UPDATE_INTERVAL_MS = 100;
 const CONNECTION_SPEED_WINDOW_MS = 5_000;
+const DATA_CHANNEL_LABEL = `${brand.namespace}-transfer`;
 
 function waitForBufferedAmount(channel) {
   if (channel.bufferedAmount <= MAX_BUFFERED_BYTES) return Promise.resolve();
@@ -94,7 +96,7 @@ export class DeviceTransferPeer {
   async startSender(source) {
     this.source = source;
     this.createConnection();
-    this.channel = this.peer.createDataChannel("uygidrive-transfer", { ordered: true });
+    this.channel = this.peer.createDataChannel(DATA_CHANNEL_LABEL, { ordered: true });
     this.configureChannel(this.channel);
     this.startPolling();
     const offer = await this.peer.createOffer();
@@ -489,7 +491,7 @@ export class DeviceTransferPeer {
 
   selectedDataChannel(stats) {
     const channels = [...stats.values()].filter((report) => report.type === "data-channel");
-    return channels.find((report) => report.label === "uygidrive-transfer") ?? channels[0] ?? null;
+    return channels.find((report) => report.label === DATA_CHANNEL_LABEL) ?? channels[0] ?? null;
   }
 
   bytesFrom(report, field) {

@@ -38,7 +38,7 @@ export const accessModeSchema = z.enum(["public", "private"]);
 export const shareRoleSchema = z.enum(["viewer", "editor"]);
 export const createShareSchema = z.object({
   mode: shareModeSchema,
-  // Firebase Auth UIDs are opaque strings, not UygiDrive node IDs.
+  // Firebase Auth UIDs are opaque strings, not drive node IDs.
   recipientId: z.string().min(1).max(128).nullable().optional().default(null),
   role: shareRoleSchema.nullable().optional().default(null),
   expiresAt: z.string().datetime().nullable().optional().default(null),

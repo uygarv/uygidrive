@@ -96,6 +96,7 @@ import { UsernameCompletionDialog } from "@/components/profile/username-completi
 import { driveApi } from "@/lib/drive-api";
 import { errorMessage } from "@/lib/drive-utils";
 import { cn } from "@/lib/utils";
+import { brand } from "@/config/brand";
 
 const PAGE_SIZE = 24;
 const sortOptions = [
@@ -454,7 +455,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   }, [search]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const saved = window.localStorage.getItem("uygidrive-view");
+      const saved = window.localStorage.getItem(`${brand.namespace}-view`);
       if (saved === "list" || saved === "grid") setView(saved);
     });
     return () => window.clearTimeout(timer);
@@ -474,7 +475,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   }, []);
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const saved = window.localStorage.getItem("uygidrive-sidebar-collapsed");
+      const saved = window.localStorage.getItem(`${brand.namespace}-sidebar-collapsed`);
       setIsSidebarCollapsed(saved === "true");
     });
     return () => window.clearTimeout(timer);
@@ -483,7 +484,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   function toggleSidebar() {
     setIsSidebarCollapsed((current) => {
       const next = !current;
-      window.localStorage.setItem("uygidrive-sidebar-collapsed", String(next));
+      window.localStorage.setItem(`${brand.namespace}-sidebar-collapsed`, String(next));
       return next;
     });
   }
@@ -525,7 +526,7 @@ export function DriveWorkspace({ initialSection = "drive" }) {
   }
   function changeView(nextView) {
     setView(nextView);
-    window.localStorage.setItem("uygidrive-view", nextView);
+    window.localStorage.setItem(`${brand.namespace}-view`, nextView);
   }
   const cursor = pagination.cursors[pagination.page] || null;
   const isTrash = activeSection === "trash";
