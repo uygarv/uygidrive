@@ -104,7 +104,7 @@ export function MarketingHome({ hasSession }) {
           </div>
         </section>
       </main>
-      <footer className="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-7 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-8"><Brand hideIconOnMobile /><span>Simple storage for your important work.</span></footer>
+      <footer className="mx-auto flex max-w-6xl flex-col gap-2 px-5 py-7 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-8"><Brand hideIconOnMobile /><span>Simpliest access to your files.</span></footer>
     </div>
   );
 }
