@@ -13,7 +13,6 @@ const features = [
   [UploadCloudIcon, "Upload easily", "Drop in your files and upload them in seconds."],
   [FolderLockIcon, "A private place for your files", "Your files stay securely in your account that only you can access."],
   [Share2Icon, "Share and collaborate", "Create share links or add collaborators to your folders."],
-  [SendIcon, "Use FileFly", "Send files up to 10x faster by connecting your devices directly, without going through a server."],
 ];
 
 const howItWorks = [
