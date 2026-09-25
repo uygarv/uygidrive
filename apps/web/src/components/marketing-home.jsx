@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { AnimatePresence, motion, useReducedMotion, useScroll, useTransform } from "motion/react";
-import { ArrowDownIcon, ArrowRightIcon, CheckIcon, CloudIcon, FolderLockIcon, Share2Icon, UploadCloudIcon, UserPlusIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowRightIcon, CheckIcon, CloudIcon, FolderLockIcon, Share2Icon, UploadCloudIcon, UserPlusIcon, SendIcon } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { ThemeMenu } from "@/components/theme-menu";
 import { Button } from "@/components/ui/button";
@@ -10,15 +10,16 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 import { brand } from "@/config/brand";
 
 const features = [
-  [UploadCloudIcon, "Upload without friction", "Drop files into your drive, track their progress, and keep working while transfers finish."],
-  [FolderLockIcon, "A private place for your files", "Every file stays scoped to your account with a clear view of your storage allowance."],
-  [Share2Icon, "Share on your terms", "Create a private link or switch an individual file to public access whenever you need to."],
+  [UploadCloudIcon, "Upload easily", "Drop in your files and upload them in seconds."],
+  [FolderLockIcon, "A private place for your files", "Your files stay securely in your account that only you can access."],
+  [Share2Icon, "Share and collaborate", "Create share links or add collaborators to your folders."],
+  [SendIcon, "Use FileFly", "Send files up to 10x faster by connecting your devices directly, without going through a server."],
 ];
 
 const howItWorks = [
   [UserPlusIcon, "Create an account", "Sign up and get a personal drive in moments."],
   [UploadCloudIcon, "Upload your files", "Add documents, photos, and videos from any device."],
-  [Share2Icon, "Manage and share", "Organize your work and choose who can access it."],
+  [Share2Icon, "Manage and share", "Organize your files and choose who can access it."],
 ];
 
 function SessionActions({ hasSession, placement, transition }) {
