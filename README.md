@@ -1,9 +1,8 @@
 # Drive
 
-File drive for storing, collaborating and sharing files powered by Firebase. The supported application is a Next.js web client backed by a Fastify API. 
-The `legacy-api` and `legacy-views` directories are retained only as an unsupported migration reference.
+Custom file drive for storing, collaborating and sharing files powered by Firebase. Project uses Next.js for the web client and Fastify for the backend. 
 
-## Quick demo
+## Quick start
 
 Requires Node.js 22 or later.
 
@@ -22,7 +21,7 @@ To open the development server from another device on your LAN, add its host/IP 
 NEXT_ALLOWED_DEV_ORIGINS=192.168.68.118
 ```
 
-Use comma-separated hostnames for multiple origins. Do not include `http://` or a port.
+Use comma separated hostnames for multiple origins.
 
 ## Setup checklist
 
@@ -30,7 +29,7 @@ Use comma-separated hostnames for multiple origins. Do not include `http://` or 
 
 - Create a Firebase project and enable **Email/Password** under Authentication.
 - Create a Firestore database and a Firebase Storage bucket.
-- Create a service account with access to that Firebase project, then base64-encode its JSON credentials for `FIREBASE_SERVICE_ACCOUNT`.
+- Create a service account with access to that Firebase project, then base64 encode its JSON credentials for `FIREBASE_SERVICE_ACCOUNT`.
 - Copy the Firebase Web API key from the project settings.
 
 ### 2. Configure the API
@@ -48,7 +47,10 @@ Set these required values in `apps/api/.env`:
 | `FIREBASE_WEB_API_KEY` | Your Firebase project’s Web API key. |
 | `WEB_ORIGIN` | The web application origin, such as `http://localhost:3000` or `https://drive.example.com`. |
 
-For production, also set `NODE_ENV=production`. Set `COOKIE_DOMAIN=.example.com` only when the web and API run on sibling subdomains such as `drive.example.com` and `api.example.com`. Otherwise leave it blank. Set a random 32+ character `MAINTENANCE_TOKEN` if you will call the maintenance endpoint from a scheduler. Cloudflare TURN variables are optional and only enable device-to-device transfers.
+- For production, also set `NODE_ENV=production`. Set `COOKIE_DOMAIN=.example.com` only when the web and API run on sibling subdomains such as `drive.example.com` and `api.example.com`, otherwise leave it blank.
+
+- Set a random 32+ character `MAINTENANCE_TOKEN` if you will call the maintenance endpoint from a scheduler. 
+- Cloudflare TURN variables are optional and only enable device-to-device transfers.
 
 ### 3. Configure the web app
 
@@ -82,12 +84,12 @@ cd apps/web && npm ci && npm run dev
 
 ## Branding
 
-Edit [apps/web/src/config/brand.js](apps/web/src/config/brand.js) to set the product name, descriptions, logo path, etc. Replace [apps/web/public/brand-logo.svg](apps/web/public/brand-logo.svg) with your logo. Keep the namespace stable after users have started using the application because it scopes browser preferences and device transfer channels.
+Edit [apps/web/src/config/brand.js](apps/web/src/config/brand.js) to set the product name, descriptions, logo path, etc. Replace [apps/web/public/brand-logo.svg](apps/web/public/brand-logo.svg) with your logo.
 
 ## Deployment notes
 
-Set `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_WEB_BASE_URL` to your public origins.
-Configure the authenticated maintenance endpoint or `npm run purge:trash` as a trusted scheduled job to purge expired Trash items and abandoned uploads.
+- Set `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_WEB_BASE_URL` to your public origins.
+- Configure the authenticated maintenance endpoint or `npm run purge:trash` as a trusted scheduled job to purge expired Trash items and abandoned uploads.
 
 ## Contributing and security
 
